@@ -1,0 +1,24 @@
+---
+Language: Cpp
+Standard: c++20
+BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 160
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+BreakBeforeBraces: Attach
+ConstructorInitializerIndentWidth: 4
+ContinuationIndentWidth: 4
+DerivePointerAlignment: false
+FixNamespaceComments: true
+IncludeBlocks: Regroup
+IndentCaseLabels: false
+NamespaceIndentation: None
+PointerAlignment: Left
+ReferenceAlignment: Left
+SortIncludes: CaseSensitive
+SpaceAfterTemplateKeyword: true

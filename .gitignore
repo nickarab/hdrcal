@@ -1,0 +1,7 @@
+build*/
+.cache/
+compile_commands.json
+patterns/*.png
+patterns/*.mkv
+patterns/*.ppm
+__pycache__/
