@@ -583,6 +583,13 @@ $ fish -c 'command -v hdrcal; hdrcal --help | head -3'
 hdrcal — calibração visual de HDR para Hyprland
 ```
 
+### Removido (2026-10-19)
+
+- `scripts/generate_pq_pattern.py` removido: era ferramenta de uso único do M0,
+  substituída pelo gerador de padrões em C++ do M2. Não era usada por build,
+  runtime, testes nem CLI. O registro histórico permanece neste CHANGELOG e em
+  `docs/DESIGN_NOTES.md`.
+
 ### Pendente
 
 - M2: verificar com padrão acima de 603 nits que a regra temporária

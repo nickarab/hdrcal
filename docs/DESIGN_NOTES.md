@@ -160,9 +160,10 @@ gerado não contém `cICP`, `iCCP` nem `sRGB`; `ffprobe` mostra
 `color_transfer=unknown` e `color_primaries=unknown`. O encoder `png` também não
 expõe opção de metadados de cor.
 
-**Decisão para o M0:** gerar os pixels e o chunk `cICP` (4 bytes: primárias 9 =
-BT.2020, transferência 16 = PQ, matriz 0 = RGB, full range 1) diretamente no
-script `scripts/generate_pq_pattern.py`. Verificado: após a geração,
+**Decisão para o M0 (histórica):** gerar os pixels e o chunk `cICP` (4 bytes:
+primárias 9 = BT.2020, transferência 16 = PQ, matriz 0 = RGB, full range 1)
+diretamente em um script Python de uso único, removido depois que o gerador C++
+do M2 o substituiu. Verificado: após a geração,
 `ffprobe` reporta `color_transfer=smpte2084`, `color_primaries=bt2020`, e o mpv
 trata a imagem como PQ.
 
