@@ -81,6 +81,8 @@ graceful. `ctest`: 117 testes verdes.
 
 **Pendente do M2:** a sessão visual real do usuário (aceite) e a integração
 explícita em `monitors.lua`. O projeto não altera essa configuração sem pedido.
+A documentação do wizard passou a incluir o pré-requisito manual
+`render:cm_auto_hdr=0`; o `hyprctl reload` final devolve o valor ao padrão.
 
 ### Correções pós-auditoria independente (2026-10-19)
 

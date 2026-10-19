@@ -105,6 +105,14 @@ hdrcal wizard --output DP-2
 O wizard verifica as pré-condições, aplica a regra temporária de tone mapping,
 abre o mpv em fullscreen na saída indicada e conduz três fases:
 
+> **Pré-requisito:** a pré-condição 3 exige `render:cm_auto_hdr = 0`. Ajuste a
+> sessão antes de iniciar (o `hyprctl reload` final do wizard devolve o valor
+> ao padrão da configuração, normalmente `1`):
+>
+> ```sh
+> hyprctl eval 'hl.config({ render = { cm_auto_hdr = 0 } })'
+> ```
+
 1. **luminância mínima** — mancha escura sobre preto; ajuste até ficar apenas
    visível;
 2. **luminância máxima** — mancha clara com xadrez; aumente até o xadrez
