@@ -157,8 +157,9 @@ primeiro. Multi-monitor não está no escopo do M1 e exigirá merge de tabela
 **Decisão:** `TemporaryLuminanceRule` aplica
 `hl.monitor({ output = ..., min_luminance = 0, max_luminance = 10000, max_avg_luminance = 10000 })`
 via `hyprctl eval` e restaura com `hyprctl reload`. O guard é RAII: o destrutor
-restaura em saída normal e em exceção. O wizard M2 chamará `restore()`
-explicitamente antes de SIGINT/SIGTERM e no watchdog.
+restaura em saída normal e em exceção. Se uma restauração explícita falhar, o
+estado é mantido como aplicado e o destrutor tenta novamente. O wizard M2
+chamará `restore()` explicitamente antes de SIGINT/SIGTERM e no watchdog.
 
 **Por que `reload`:** ele relê a configuração do monitor (incluindo
 `monitors.lua` e `hdrcal.lua`) e reaplica a regra persistida. Reaplicar valores

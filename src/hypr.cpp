@@ -209,7 +209,8 @@ std::optional<std::string> TemporaryLuminanceRule::apply(std::string_view output
 
 std::optional<std::string> TemporaryLuminanceRule::restore() {
     const std::optional<std::string> error = m_controller->reload();
-    m_applied = false;
+    if (!error.has_value())
+        m_applied = false;
     return error;
 }
 

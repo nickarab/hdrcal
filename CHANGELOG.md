@@ -56,6 +56,8 @@ existe. Datas em UTC.
 - A regra temporária de luminância é aplicada via `hl.monitor({...})` e
   restaurada via `hyprctl reload`; o JSON de `monitors` não expõe os campos de
   luminância para restauração direta.
+- Se `restore()` falha, o guard mantém o estado aplicado e tenta a restauração
+  novamente no destrutor; o erro continua sendo devolvido ao chamador.
 - A persistência é uma tabela Lua em `~/.config/hypr/hdrcal.lua`. O projeto não
   altera `monitors.lua` sem pedido explícito; a integração de consumo está
   documentada no README.
@@ -76,7 +78,7 @@ existe. Datas em UTC.
 - FFmpeg 9.0.1 não grava metadados de cor em PNG; o script passou a escrever o
   chunk `cICP` diretamente.
 
-### Verificado
+### Última verificação
 
 ```text
 $ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -89,10 +91,10 @@ Test project /home/manoel/hdrcal/build
 100% tests passed out of 1
 
 $ ./build/hdrcal_tests
-60 passaram, 0 falharam
+61 passaram, 0 falharam
 ```
 
-Também compilado sem warnings com `clang++` em `build-clang` (mesmos 60 testes
+Também compilado sem warnings com `clang++` em `build-clang` (mesmos 61 testes
 verdes).
 
 ```text

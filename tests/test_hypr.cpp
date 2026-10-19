@@ -176,3 +176,22 @@ HDRCAL_TEST(testTemporaryLuminanceRule_ExplicitRestoreDoesNotReloadTwice) {
 
     HDRCAL_REQUIRE_EQ(fake.recordedCommands.size(), std::size_t{2});
 }
+
+HDRCAL_TEST(testTemporaryLuminanceRule_FailedExplicitRestore_RetriesOnDestruction) {
+    FakeHyprCommands fake;
+    fake.handler = [](const std::vector<std::string>& arguments) {
+        if (arguments.size() >= 2 && arguments.at(1) == "reload")
+            return hdrcal::CommandResult{.exitCode = 1, .standardOutput = {}, .standardError = "reload failed"};
+        return successfulResult("ok\n");
+    };
+
+    const hdrcal::HyprController controller(fake.executor());
+    {
+        hdrcal::TemporaryLuminanceRule guard(controller);
+        HDRCAL_REQUIRE(!guard.apply("DP-2").has_value());
+        HDRCAL_REQUIRE(guard.restore().has_value());
+        HDRCAL_REQUIRE_EQ(fake.recordedCommands.size(), std::size_t{2});
+    }
+
+    HDRCAL_REQUIRE_EQ(fake.recordedCommands.size(), std::size_t{3});
+}
