@@ -287,7 +287,32 @@ std::string describeMonitorRuleSyntax(hdrcal::MonitorRuleSyntax syntax) {
     return syntax == hdrcal::MonitorRuleSyntax::Lua ? "Lua" : "legado";
 }
 
+void printIntegrateUsage() {
+    std::cout << "hdrcal integrate — liga o perfil do hdrcal à configuração do monitor\n\n";
+    std::cout << "Uso:\n";
+    std::cout << "  hdrcal integrate --output <nome> [--config-dir <diretório>] [--apply]\n\n";
+    std::cout << "Sem --apply é dry-run: imprime o diff e não altera nenhum arquivo.\n";
+    std::cout << "Com --apply: cria backup, edita, executa hyprctl reload, valida e desfaz\n";
+    std::cout << "automaticamente se a validação falhar.\n\n";
+    std::cout << "Opções:\n";
+    std::cout << "  --output <nome>     saída do monitor (ex.: DP-2); a regra precisa ter\n";
+    std::cout << "                      output exatamente igual a esse nome\n";
+    std::cout << "  --config-dir <dir>  diretório do Hyprland (padrão: $XDG_CONFIG_HOME/hypr)\n";
+    std::cout << "  --apply             aplica a alteração; sem ela, apenas mostra o diff\n";
+    std::cout << "  -h, --help          mostra esta ajuda\n\n";
+    std::cout << "Exemplos:\n";
+    std::cout << "  hdrcal integrate --output DP-2\n";
+    std::cout << "  hdrcal integrate --output DP-2 --apply\n";
+}
+
 int runIntegrate(const std::vector<std::string>& arguments) {
+    for (std::size_t index = 1; index < arguments.size(); ++index) {
+        if (arguments[index] == "--help" || arguments[index] == "-h") {
+            printIntegrateUsage();
+            return 0;
+        }
+    }
+
     const ParsedOptions options = parseOptions(arguments, 1, {"output", "config-dir"}, {"apply"});
     if (options.error.has_value()) {
         std::cerr << "erro: " << *options.error << "\n";

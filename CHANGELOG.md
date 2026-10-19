@@ -234,9 +234,10 @@ valor ao padrão.
   confere `hyprctl configerrors` por erros que mencionem o arquivo editado,
   relê a regra (`findMonitorRuleLocation`) e replaneja o texto para confirmar os
   três campos.
-- **CLI:** `--help` documenta o dry-run; README passa a recomendar o comando e
-  mantém o exemplo manual como alternativa; DESIGN_NOTES registra a decisão
-  "plug explícito ≠ automagicidade".
+- **CLI:** `hdrcal integrate --help`/`-h` mostra ajuda específica com opções,
+  dry-run, backup e exemplos; o `--help` global documenta o dry-run. README
+  passa a recomendar o comando e mantém o exemplo manual como alternativa;
+  DESIGN_NOTES registra a decisão "plug explícito ≠ automagicidade".
 - **Testes:** 14 novos (planner, idempotência, campos preservados, fallback sem
   perfil, ambiguidade, legado, tabela de uma linha, comentários, backup,
   rollback e RAII). Total: **136 passaram, 0 falharam**.
