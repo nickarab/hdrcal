@@ -173,12 +173,12 @@ std::optional<QuotedValue> readQuotedValue(std::string_view text, std::size_t po
     return std::nullopt;
 }
 
-std::optional<std::string> findLuaMonitorOutputInFile(std::string_view content, const std::vector<std::size_t>& lineStarts,
-                                                      const std::vector<std::size_t>& lineNumbers, std::string_view outputName) {
-    auto lineLocation = [&](std::size_t offset) -> std::string {
+void findLuaMonitorOutputsInFile(std::string_view content, const std::vector<std::size_t>& lineStarts, const std::vector<std::size_t>& lineNumbers,
+                                 std::string_view outputName, std::vector<std::size_t>& matchingLineNumbers) {
+    auto lineNumberAt = [&](std::size_t offset) -> std::size_t {
         const auto iterator = std::upper_bound(lineStarts.begin(), lineStarts.end(), offset);
         const std::size_t index = iterator == lineStarts.begin() ? 0 : static_cast<std::size_t>(iterator - lineStarts.begin() - 1);
-        return std::to_string(lineNumbers.at(index));
+        return lineNumbers.at(index);
     };
 
     std::size_t position = 0;
@@ -260,12 +260,10 @@ std::optional<std::string> findLuaMonitorOutputInFile(std::string_view content, 
         }
 
         if (foundOutput)
-            return lineLocation(callStart);
+            matchingLineNumbers.push_back(lineNumberAt(callStart));
 
         position = cursor;
     }
-
-    return std::nullopt;
 }
 
 bool isLegacyMonitorRuleForOutput(std::string_view line, std::string_view outputName) {
@@ -358,7 +356,8 @@ HyprConfigLinesResult readHyprConfigLines(const std::filesystem::path& configDir
     return result;
 }
 
-MonitorRuleLocation findMonitorRuleLocation(const std::vector<HyprConfigLine>& lines, std::string_view outputName) {
+MonitorRuleMatchesResult findMonitorRuleMatches(const std::vector<HyprConfigLine>& lines, std::string_view outputName) {
+    MonitorRuleMatchesResult result;
     std::size_t index = 0;
 
     while (index < lines.size()) {
@@ -377,9 +376,10 @@ MonitorRuleLocation findMonitorRuleLocation(const std::vector<HyprConfigLine>& l
         }
 
         if (filePath.extension() == ".lua") {
-            const std::optional<std::string> line = findLuaMonitorOutputInFile(content, lineStarts, lineNumbers, outputName);
-            if (line.has_value())
-                return {filePath.string() + ":" + *line, std::nullopt};
+            std::vector<std::size_t> matchingLines;
+            findLuaMonitorOutputsInFile(content, lineStarts, lineNumbers, outputName, matchingLines);
+            for (const std::size_t lineNumber : matchingLines)
+                result.matches.push_back(MonitorRuleMatch{.filePath = filePath, .lineNumber = lineNumber, .syntax = MonitorRuleSyntax::Lua});
             continue;
         }
 
@@ -387,11 +387,20 @@ MonitorRuleLocation findMonitorRuleLocation(const std::vector<HyprConfigLine>& l
             const std::size_t start = lineStarts[lineIndex];
             const std::size_t end = lineIndex + 1 < lineStarts.size() ? lineStarts[lineIndex + 1] : content.size();
             if (isLegacyMonitorRuleForOutput(std::string_view(content).substr(start, end - start), outputName))
-                return {filePath.string() + ":" + std::to_string(lineNumbers[lineIndex]), std::nullopt};
+                result.matches.push_back(MonitorRuleMatch{.filePath = filePath, .lineNumber = lineNumbers[lineIndex], .syntax = MonitorRuleSyntax::Legacy});
         }
     }
 
-    return {std::nullopt, std::nullopt};
+    return result;
+}
+
+MonitorRuleLocation findMonitorRuleLocation(const std::vector<HyprConfigLine>& lines, std::string_view outputName) {
+    const MonitorRuleMatchesResult matches = findMonitorRuleMatches(lines, outputName);
+    if (matches.matches.empty())
+        return {std::nullopt, std::nullopt};
+
+    const MonitorRuleMatch& first = matches.matches.front();
+    return {first.filePath.string() + ":" + std::to_string(first.lineNumber), std::nullopt};
 }
 
 } // namespace hdrcal

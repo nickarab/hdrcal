@@ -26,6 +26,7 @@ add_library(hdrcal_core STATIC
     src/command.cpp
     src/hypr.cpp
     src/hypr_config.cpp
+    src/integrate.cpp
     src/json.cpp
     src/key_source.cpp
     src/kms.cpp
@@ -51,6 +52,7 @@ add_executable(hdrcal_tests
     tests/test_command.cpp
     tests/test_hypr.cpp
     tests/test_hypr_config.cpp
+    tests/test_integrate.cpp
     tests/test_json.cpp
     tests/test_key_source.cpp
     tests/test_kms.cpp

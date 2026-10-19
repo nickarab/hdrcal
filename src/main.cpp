@@ -1,6 +1,8 @@
 // Command-line interface for profile persistence, preflight checks and KMS probing.
 
 #include "hdrcal/hypr.hpp"
+#include "hdrcal/hypr_config.hpp"
+#include "hdrcal/integrate.hpp"
 #include "hdrcal/kms.hpp"
 #include "hdrcal/number_format.hpp"
 #include "hdrcal/preflight.hpp"
@@ -113,10 +115,12 @@ void printUsage() {
     std::cout << "                        [--osd-brightness <0-100>] [--osd-contrast <0-100>]\n";
     std::cout << "                        [--osd-color-preset <nome>] [--path <arquivo>] [--no-reload]\n";
     std::cout << "  hdrcal wizard --output <nome> [--profile-path <arquivo>] [--config-dir <diretório>]\n";
+    std::cout << "  hdrcal integrate --output <nome> [--config-dir <diretório>] [--apply]\n";
     std::cout << "  hdrcal preflight --output <nome> [--config-dir <diretório>]\n";
     std::cout << "  hdrcal probe --output <nome>\n";
     std::cout << "  hdrcal --help\n\n";
-    std::cout << "Caminho do perfil (prioridade): --path/--profile-path > HDRICAL_PROFILE_PATH > XDG.\n\n";
+    std::cout << "Caminho do perfil (prioridade): --path/--profile-path > HDRICAL_PROFILE_PATH > XDG.\n";
+    std::cout << "integrate é dry-run por padrão; só escreve a config com --apply.\n\n";
     std::cout << "Exemplo:\n";
     std::cout << "  hdrcal profile write --output DP-2 --min 0.02 --max 600 --avg 350\n";
 }
@@ -279,6 +283,155 @@ int runProbe(const std::vector<std::string>& arguments) {
     return 0;
 }
 
+std::string describeMonitorRuleSyntax(hdrcal::MonitorRuleSyntax syntax) {
+    return syntax == hdrcal::MonitorRuleSyntax::Lua ? "Lua" : "legado";
+}
+
+int runIntegrate(const std::vector<std::string>& arguments) {
+    const ParsedOptions options = parseOptions(arguments, 1, {"output", "config-dir"}, {"apply"});
+    if (options.error.has_value()) {
+        std::cerr << "erro: " << *options.error << "\n";
+        return 2;
+    }
+    if (const auto missing = findMissingValueError(options, "output"); missing.has_value()) {
+        std::cerr << "erro: " << *missing << "\n";
+        return 2;
+    }
+
+    const std::string& outputName = options.values.at("output");
+    if (const auto outputError = hdrcal::findOutputNameValidationError(outputName); outputError.has_value()) {
+        std::cerr << "erro: " << *outputError << "\n";
+        return 2;
+    }
+
+    const std::filesystem::path configDirectory =
+        options.values.contains("config-dir") ? std::filesystem::path(options.values.at("config-dir")) : defaultConfigDirectory();
+
+    std::error_code filesystemError;
+    if (!std::filesystem::is_directory(configDirectory, filesystemError)) {
+        if (filesystemError)
+            std::cerr << "erro: não foi possível verificar o diretório de configuração " << configDirectory.string() << ": " << filesystemError.message()
+                      << "\n";
+        else
+            std::cerr << "erro: diretório de configuração não encontrado: " << configDirectory.string() << "\n";
+        return 1;
+    }
+
+    const hdrcal::HyprConfigLinesResult configLines = hdrcal::readHyprConfigLines(configDirectory);
+    if (configLines.error.has_value()) {
+        std::cerr << "erro: " << *configLines.error << "\n";
+        return 1;
+    }
+
+    const hdrcal::MonitorRuleMatchesResult matches = hdrcal::findMonitorRuleMatches(configLines.lines, outputName);
+
+    if (matches.matches.empty()) {
+        std::cerr << "erro: nenhuma regra de monitor com output exatamente igual a '" << outputName << "' foi encontrada em " << configDirectory.string()
+                  << ".\n"
+                  << "Crie uma regra Lua com output = \"" << outputName
+                  << "\" (por exemplo em monitors.lua). Regras por 'desc:', 'make:' ou curingas não são aceitas porque o merge "
+                     "parcial do hl.monitor não as copia.\n";
+        return 1;
+    }
+
+    if (matches.matches.size() > 1) {
+        std::cerr << "erro: mais de uma regra de monitor para '" << outputName << "' foi encontrada; a integração recusa configurações ambíguas:\n";
+        for (const hdrcal::MonitorRuleMatch& match : matches.matches)
+            std::cerr << "  - " << match.filePath.string() << ":" << match.lineNumber << " (" << describeMonitorRuleSyntax(match.syntax) << ")\n";
+        std::cerr << "Deixe apenas uma regra com output exatamente igual a '" << outputName << "'.\n";
+        return 1;
+    }
+
+    const hdrcal::MonitorRuleMatch& match = matches.matches.front();
+    if (match.syntax == hdrcal::MonitorRuleSyntax::Legacy) {
+        std::cerr << "erro: a regra de '" << outputName << "' está no formato legado (" << match.filePath.string() << ":" << match.lineNumber
+                  << "). O hdrcal integrate só edita configuração Lua; converta a regra para hl.monitor({ output = \"" << outputName
+                  << "\", ... }) ou integre manualmente.\n";
+        return 1;
+    }
+
+    const hdrcal::ConfigFileContent fileContent = hdrcal::readConfigFileContent(match.filePath);
+    if (fileContent.error.has_value()) {
+        std::cerr << "erro: " << *fileContent.error << "\n";
+        return 1;
+    }
+
+    const hdrcal::IntegrationPlan plan = hdrcal::planMonitorRuleIntegration(fileContent.content, outputName);
+    if (plan.error.has_value()) {
+        std::cerr << "erro: " << *plan.error << "\n";
+        return 1;
+    }
+
+    if (plan.alreadyIntegrated) {
+        std::cout << "já integrado: " << match.filePath.string() << ":" << match.lineNumber
+                  << " já contém min_luminance, max_luminance e max_avg_luminance; nenhuma alteração necessária.\n";
+        return 0;
+    }
+
+    std::string diffPath = match.filePath.string();
+    if (!diffPath.empty() && diffPath.front() == '/')
+        diffPath.erase(0, 1);
+
+    std::cout << "--- a/" << diffPath << "\n";
+    std::cout << "+++ b/" << diffPath << "\n";
+    std::cout << plan.diff;
+
+    if (!options.flags.contains("apply")) {
+        std::cout << "\ndry-run: nenhuma alteração foi escrita. Use --apply para aplicar.\n";
+        return 0;
+    }
+
+    const hdrcal::HyprController controller = hdrcal::HyprController::createWithSystemExecutor();
+    hdrcal::ConfigEditTransaction transaction(match.filePath, fileContent.content, plan.updatedContent);
+    if (const auto writeError = transaction.write(); writeError.has_value()) {
+        std::cerr << "erro: " << *writeError << "\n";
+        return 1;
+    }
+
+    std::cout << "backup: " << transaction.backupPath().string() << "\n";
+
+    const auto validation = [&]() -> std::optional<std::string> {
+        if (const auto reloadError = controller.reload(); reloadError.has_value())
+            return reloadError;
+
+        const hdrcal::HyprConfigErrorsResult configErrors = controller.readConfigErrors();
+        if (!configErrors.value.has_value())
+            return configErrors.error;
+        if (configErrors.value->find(match.filePath.filename().string()) != std::string::npos)
+            return "o Hyprland reportou erro de configuração em " + match.filePath.string() + ": " + *configErrors.value;
+
+        const hdrcal::HyprConfigLinesResult editedLines = hdrcal::readHyprConfigLines(configDirectory);
+        if (editedLines.error.has_value())
+            return "não foi possível reler a configuração após a edição: " + *editedLines.error;
+
+        const hdrcal::MonitorRuleLocation location = hdrcal::findMonitorRuleLocation(editedLines.lines, outputName);
+        if (location.error.has_value())
+            return location.error;
+        if (!location.location.has_value())
+            return "a regra de '" + outputName + "' não foi encontrada após a edição";
+
+        const hdrcal::ConfigFileContent editedContent = hdrcal::readConfigFileContent(match.filePath);
+        if (editedContent.error.has_value())
+            return editedContent.error;
+
+        const hdrcal::IntegrationPlan editedPlan = hdrcal::planMonitorRuleIntegration(editedContent.content, outputName);
+        if (editedPlan.error.has_value())
+            return "a configuração editada não passou na releitura: " + *editedPlan.error;
+        if (!editedPlan.alreadyIntegrated)
+            return "a configuração editada não contém os três campos de luminância esperados";
+
+        return std::nullopt;
+    };
+
+    if (const auto validationError = transaction.commitAfterValidation(validation); validationError.has_value()) {
+        std::cerr << "erro: " << *validationError << "\n";
+        return 1;
+    }
+
+    std::cout << "integração aplicada em " << match.filePath.string() << "\n";
+    return 0;
+}
+
 int runWizard(const std::vector<std::string>& arguments) {
     const ParsedOptions options = parseOptions(arguments, 1, {"output", "profile-path", "config-dir"}, {});
     if (options.error.has_value()) {
@@ -342,6 +495,9 @@ int main(int argumentCount, char** argumentValues) {
 
     if (arguments[0] == "wizard")
         return runWizard(arguments);
+
+    if (arguments[0] == "integrate")
+        return runIntegrate(arguments);
 
     if (arguments[0] == "preflight")
         return runPreflight(arguments);

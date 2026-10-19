@@ -38,6 +38,27 @@ struct MonitorRuleLocation {
     std::optional<std::string> error;
 };
 
+enum class MonitorRuleSyntax {
+    Lua,
+    Legacy,
+};
+
+struct MonitorRuleMatch {
+    std::filesystem::path filePath;
+    std::size_t lineNumber = 0;
+    MonitorRuleSyntax syntax = MonitorRuleSyntax::Lua;
+};
+
+struct MonitorRuleMatchesResult {
+    std::vector<MonitorRuleMatch> matches;
+};
+
+// Returns every monitor rule whose selector is exactly outputName, across all
+// scanned files. The integration command needs the full list to refuse an
+// ambiguous configuration instead of editing the first match. The single-match
+// helper below keeps the preflight/guard behavior.
+[[nodiscard]] MonitorRuleMatchesResult findMonitorRuleMatches(const std::vector<HyprConfigLine>& lines, std::string_view outputName);
+
 // Finds a monitor rule whose selector is exactly outputName. Both the Lua form
 // (`hl.monitor({ output = "DP-2", ... })`, including multi-line calls) and the
 // legacy form (`monitor=DP-2,...` in a .conf file) are recognized. Rules keyed

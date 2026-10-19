@@ -69,6 +69,11 @@ struct HyprlandVersionResult {
     std::optional<std::string> error;
 };
 
+struct HyprConfigErrorsResult {
+    std::optional<std::string> value;
+    std::optional<std::string> error;
+};
+
 // Negative when left is older than right; zero when both versions are equal.
 [[nodiscard]] int compareHyprlandVersions(const HyprlandVersion& left, const HyprlandVersion& right);
 
@@ -93,6 +98,10 @@ public:
     [[nodiscard]] HyprOptionReadResult readOption(std::string_view optionName) const;
     [[nodiscard]] HyprMonitorListResult listMonitors() const;
     [[nodiscard]] HyprlandVersionResult readVersion() const;
+
+    // Raw output of `hyprctl configerrors`, used by `hdrcal integrate` to
+    // detect a syntax error introduced by the edit before keeping it.
+    [[nodiscard]] HyprConfigErrorsResult readConfigErrors() const;
 
     // Asks Hyprland to re-read its configuration. Returns std::nullopt on
     // success.

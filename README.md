@@ -133,6 +133,13 @@ Opções: `--profile-path <arquivo>` (prioridade máxima), `--config-dir
 <diretório>` e `HDRICAL_PROFILE_PATH`. O padrão é
 `$XDG_CONFIG_HOME/hypr/hdrcal.lua`.
 
+Ligar o perfil à configuração do monitor (uma vez; dry-run por padrão):
+
+```sh
+hdrcal integrate --output DP-2
+hdrcal integrate --output DP-2 --apply
+```
+
 Gravar um perfil manualmente (M1):
 
 ```sh
@@ -199,9 +206,26 @@ return {
 ```
 
 Para que o perfil seja aplicado, a configuração do monitor precisa consumir a
-tabela. O projeto **não altera** `monitors.lua` automaticamente: a integração
-é um ponto acordado com o usuário (seção 12 das instruções). Exemplo de
-consumo em `monitors.lua`, seguro quando o perfil ainda não existe:
+tabela. O caminho recomendado é o comando explícito:
+
+```sh
+hdrcal integrate --output DP-2          # dry-run: mostra o diff, não escreve
+hdrcal integrate --output DP-2 --apply  # escreve, valida e mantém backup
+```
+
+O `integrate` localiza a regra pelo nome exato da saída (Lua multi-linha ou
+`monitor=` legado), recusa configurações ambíguas e, sem `--apply`, apenas
+imprime o diff. Com `--apply` ele cria um backup
+`monitors.lua.bak.hdrcal.<timestamp>` ao lado do arquivo, faz a edição mínima,
+executa `hyprctl reload`, relê a regra e desfaz automaticamente se a validação
+falhar. Rodar de novo é seguro: se os três campos já existem, nada é escrito.
+A integração não exige perfil existente; ela apenas passa a consumir
+`require("hdrcal").profiles["DP-2"]` quando o arquivo aparecer. O projeto
+**não altera** a config na instalação, no build nem no wizard — só neste
+comando explícito.
+
+O resultado em `monitors.lua` é equivalente a este trecho (o comando insere o
+bloco de perfil e os três campos, preservando todos os demais):
 
 ```lua
 local ok, hdrcal = pcall(require, "hdrcal")
@@ -239,7 +263,8 @@ do Hyprland é limpo antes da releitura.
   é suportado: gravar um novo perfil substitui o arquivo inteiro.
 - A aplicação automática do perfil exige que a configuração do monitor consuma
   `require("hdrcal")` (snippet acima). O wizard grava o arquivo e executa
-  `hyprctl reload`, mas **não edita** `monitors.lua` sem pedido explícito.
+  `hyprctl reload`, mas **não edita** `monitors.lua` sem pedido explícito; para
+  isso existe `hdrcal integrate --apply`.
 - O M2 foi aceito pelo usuário em 2026-10-19. O wizard foi validado com teclas
   sintéticas (três fases, perfil, `Esc`, SIGTERM e watchdog); o aceite formal
   não transforma os valores do smoke test em uma calibração real.

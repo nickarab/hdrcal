@@ -273,6 +273,14 @@ HyprlandVersionResult HyprController::readVersion() const {
     return {version, std::nullopt};
 }
 
+HyprConfigErrorsResult HyprController::readConfigErrors() const {
+    const CommandResult result = m_executor({"hyprctl", "configerrors"});
+    if (result.exitCode != 0)
+        return {std::nullopt, commandFailureMessage("hyprctl configerrors", result)};
+
+    return {result.standardOutput, std::nullopt};
+}
+
 int compareHyprlandVersions(const HyprlandVersion& left, const HyprlandVersion& right) {
     if (left.major != right.major)
         return left.major < right.major ? -1 : 1;

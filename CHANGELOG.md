@@ -211,6 +211,82 @@ valor ao padrão.
   `docs/DESIGN_NOTES.md`.
 - O exemplo do README foi alinhado ao código real (incluindo o `pcall`).
 
+#### W5 — comando explícito `hdrcal integrate`
+
+- **Adicionado:** `hdrcal integrate --output <saída> [--config-dir <dir>]
+  [--apply]`. Sem `--apply` é dry-run: imprime diff unificado e não escreve;
+  `--apply` é o único caminho que edita a config.
+- **Seleção:** `findMonitorRuleMatches` devolve todas as regras com `output`
+  exatamente igual à saída. Zero regras, múltiplas regras (em qualquer arquivo)
+  ou regra legada `monitor=` viram erro pt-BR acionável; legado é recusado
+  porque `require("hdrcal")` só existe na config Lua.
+- **Editor puro:** `planMonitorRuleIntegration` insere o bloco
+  `pcall(require, "hdrcal")` + `hdrcalProfile` e os três campos
+  (`min_luminance`, `max_luminance`, `max_avg_luminance`) antes do `}`,
+  preservando todos os campos existentes. Ignora comentários/strings, suporta
+  tabela multi-linha e de uma linha e é idempotente: com os três campos
+  presentes, o diff é vazio e nada é escrito. Campos parciais são recusados
+  para não duplicar chaves.
+- **Transação:** `ConfigEditTransaction` grava
+  `<arquivo>.bak.hdrcal.<timestamp>`, substitui com `tmp + fsync + rename`,
+  preserva as permissões e restaura o original se a validação falhar ou se o
+  objeto for destruído antes do commit. A validação executa `hyprctl reload`,
+  confere `hyprctl configerrors` por erros que mencionem o arquivo editado,
+  relê a regra (`findMonitorRuleLocation`) e replaneja o texto para confirmar os
+  três campos.
+- **CLI:** `--help` documenta o dry-run; README passa a recomendar o comando e
+  mantém o exemplo manual como alternativa; DESIGN_NOTES registra a decisão
+  "plug explícito ≠ automagicidade".
+- **Testes:** 14 novos (planner, idempotência, campos preservados, fallback sem
+  perfil, ambiguidade, legado, tabela de uma linha, comentários, backup,
+  rollback e RAII). Total: **136 passaram, 0 falharam**.
+
+**Verificação ao vivo (2026-10-19):**
+
+```text
+$ ./build/hdrcal integrate --output DP-2
+já integrado: /home/manoel/.config/hypr/monitors.lua:4 já contém min_luminance, max_luminance e max_avg_luminance; nenhuma alteração necessária.
+exit=0
+```
+
+Config sintética em `/tmp/opencode/hdrcal-integrate-test`:
+
+```text
+$ ./build/hdrcal integrate --output DP-2 --config-dir /tmp/opencode/hdrcal-integrate-test --apply
+--- a//tmp/opencode/hdrcal-integrate-test/monitors.lua
++++ b//tmp/opencode/hdrcal-integrate-test/monitors.lua
+@@ -1,3 +1,6 @@
++local hdrcalOk, hdrcalModule = pcall(require, "hdrcal")
++local hdrcalProfile = hdrcalOk and hdrcalModule and hdrcalModule.profiles and hdrcalModule.profiles["DP-2"] or nil
++
+ hl.monitor({
+...
+backup: /tmp/opencode/hdrcal-integrate-test/monitors.lua.bak.hdrcal.2026-10-19T23-05-37Z
+integração aplicada em /tmp/opencode/hdrcal-integrate-test/monitors.lua
+exit=0
+
+$ ./build/hdrcal integrate --output DP-2 --config-dir /tmp/opencode/hdrcal-integrate-test --apply
+já integrado: ... nenhuma alteração necessária.
+# nenhum segundo backup foi criado
+```
+
+Rollback forçado com um `hyprctl` falso que falha no `reload`:
+
+```text
+$ PATH=/tmp/opencode/hdrcal-fakebin:$PATH ./build/hdrcal integrate --output DP-2 \
+    --config-dir /tmp/opencode/hdrcal-int-rollback --apply
+backup: /tmp/opencode/hdrcal-int-rollback/monitors.lua.bak.hdrcal.2026-10-19T23-07-10Z
+erro: validação falhou: hyprctl reload falhou (código 1); alteração desfeita a partir do backup ...
+exit=1
+
+$ diff -u original.expected monitors.lua
+# sem diferenças: conteúdo original restaurado; backup preservado
+```
+
+Arquivo somente-leitura: `--apply` recusa antes de escrever com
+`erro: sem permissão de escrita em ...: Permission denied` (exit 1) e o
+conteúdo permanece idêntico.
+
 ### Decidido
 
 - `hyprctl keyword` não funciona com a configuração Lua do Hyprland 0.56.2;

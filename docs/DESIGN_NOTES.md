@@ -378,6 +378,45 @@ removido depois; os valores do smoke test não foram promovidos a calibração.
 `~/.config/hypr/monitors.lua` em 2026-10-19 foi a única exceção, expressamente
 autorizada pelo usuário para o W4. Integrações futuras exigem novo pedido.
 
+### Plug explícito com `hdrcal integrate` (W5)
+
+**Decisão:** o plug que a W4 fez manualmente vira um comando explícito, não um
+passo automático de instalação/build/wizard. `hdrcal integrate` só toca a config
+quando o usuário roda o comando; sem `--apply` ele é dry-run e imprime o diff.
+Isso preserva a regra de não editar config alheia silenciosamente e resolve o
+problema de outras máquinas precisarem copiar o exemplo do README.
+
+**Seleção da regra:** o comando usa `findMonitorRuleMatches`, que devolve
+**todas** as regras com `output` exatamente igual à saída. Zero regras vira erro
+acionável; mais de uma (inclusive em arquivos diferentes) vira erro de
+ambiguidade com a lista `arquivo:linha` e o formato (Lua/legado). Regra legada
+`monitor=` é detectada, mas a edição é recusada: `require` só existe na config
+Lua, então o erro pede conversão ou integração manual.
+
+**Editor puro:** `planMonitorRuleIntegration(texto, saída)` localiza a única
+chamada `hl.monitor` no texto cru, ignora comentários/strings, verifica os três
+campos no nível superior da tabela e insere o bloco
+`local hdrcalOk, hdrcalModule = pcall(require, "hdrcal")` +
+`local hdrcalProfile = ...` antes da chamada, mais os três campos antes do `}`.
+Campos existentes são preservados; se os três já estão presentes, o plano é
+`alreadyIntegrated` e o diff fica vazio (idempotência). Campos parciais viram
+erro para não duplicar chaves. Tabelas multi-linha e de uma linha são
+suportadas; a chamada precisa começar em linha própria quando o bloco de perfil
+será inserido, senão o comando recusa em vez de quebrar a expressão.
+
+**Transação:** `ConfigEditTransaction` captura as permissões originais, grava
+`<arquivo>.bak.hdrcal.<timestamp>` ao lado, substitui o arquivo com
+`writeFileAtomically` (tmp + fsync + rename) e restaura o original se a
+validação falhar ou se o objeto for destruído antes do commit. A validação roda
+`hyprctl reload`, confere `hyprctl configerrors` por erros que mencionem o
+arquivo editado, relê a regra com `findMonitorRuleLocation` e replaneja o texto
+para confirmar os três campos. O backup permanece após sucesso e após rollback.
+
+**Aceite real:** na máquina do usuário, `hdrcal integrate --output DP-2`
+detectou a integração da W4 e respondeu "já integrado ... nenhuma alteração
+necessária" (exit 0). Em config sintética, `--apply` escreveu o bloco, criou o
+backup e a segunda execução não duplicou nada.
+
 ## Pré-condições (seção 8.2)
 
 O preflight executa as cinco verificações de HDR, sempre reportando todas, e em
