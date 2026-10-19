@@ -45,6 +45,78 @@ verificado por leitura do infoframe. A verificação de que o compositor deixa d
 tonemapar conteúdo acima do pico do painel fica para o M2, com um padrão acima
 de 603 nits. No M0, 600 < 603, então a conclusão visual não depende disso.
 
+## M2 — wizard com backend mpv (2026-10-19)
+
+**Arquitetura:** o wizard é uma máquina de estados pura (`CalibrationWizard`)
+alimentada por teclas, com uma camada de sessão que integra Hyprland, mpv,
+padrões, watchdog e persistência. Nenhum teste unitário exige GPU, compositor
+ou interação.
+
+**Padrões:** PNG RGB 16-bit, 2560×1440 (resolução lida do monitor), com `cICP`
+BT.2020/PQ/full-range. Fases:
+
+- mínima: mancha central de 25% da tela sobre preto;
+- máxima: mancha central com xadrez de 16 px alternando `código` e
+  `código - 16`, para tornar o clipping visível;
+- frame completo: campo uniforme de tela cheia.
+
+Códigos iniciais: 100 (mínima), 700 (máxima) e 592 (frame completo). Setas
+mudam 1 código; Shift+setas mudam 10. O perfil registra a luminância calculada
+por ST 2084, com máximo e full-frame arredondados para inteiros (campos int do
+Hyprland).
+
+**mpv:** processo filho em grupo próprio, fullscreen por
+`--fs-screen-name=<saída>`, `--target-colorspace-hint=yes`, `--vo=gpu-next`,
+`--tone-mapping=clip`, `--hdr-compute-peak=no`, `--no-input-default-bindings`,
+`--no-osc`, `--image-display-duration=inf`, `--scale=nearest` e
+`--input-ipc-server=<socket>`. O padrão é trocado por
+`{"command":["loadfile",...]}` e o OSD por `show-text`. O terminal recebe as
+instruções e o resumo; o feedback visual fica no OSD do mpv.
+
+**Teclas:** um script Lua embutido (`kMpvKeyForwardScript`) é escrito no
+diretório da sessão e carregado com `--script`. Ele abre o FIFO
+`$HDRCAL_KEY_FIFO` e escreve `left`, `right`, `shift-left`, `shift-right`,
+`enter` ou `escape` por linha. O hdrcal lê o FIFO em modo não bloqueante e
+mapeia para `WizardKey`. Usamos `mp.add_forced_key_binding`, não
+`mp.add_key_binding`: em teste controlado, `hl.dsp.send_shortcut` entregou a
+tecla ao mpv (`[input] No key binding found for key 'RIGHT'`) mas não acionou o
+binding normal do script; o binding forçado acionou. O teste com teclado real
+do usuário continua sendo o aceite.
+
+**Restauração:** o guard RAII restaura em saída normal, exceção e `Esc`. O
+wizard instala handlers de SIGINT/SIGTERM que apenas setam um
+`volatile sig_atomic_t`; o loop polla o FIFO em fatias de 100 ms, vê a flag,
+restaura e re-levanta o sinal com o handler default. O watchdog é um processo
+destacado por double-fork, ligado ao hdrcal por `socketpair`. O pai envia
+`mpv <pid>` após lançar o mpv e `done` no encerramento normal. Se o socket
+fechar sem `done` (crash, SIGKILL, exceção não tratada), o watchdog mata o mpv
+com SIGTERM, espera 200 ms e executa `hyprctl reload`. Testes cobrem o caminho
+de crash e o encerramento gracioso, incluindo a morte do mpv órfão.
+
+**Bug corrigido no caminho:** `SessionDirectory` tinha destrutor customizado e
+cópia implícita; ao mover o `optional<SessionDirectory>` para a sessão, a cópia
+temporária era destruída e apagava o diretório antes do `mkfifo`. O tipo passou
+a ser move-only com `path.clear()` no moved-from; o M2 não teria funcionado sem
+essa correção.
+
+**Smoke test ao vivo (2026-10-19):**
+
+- preflight com `cm_auto_hdr=0`: seis verificações `[PASS]`, incluindo a versão
+  do Hyprland;
+- três fases concluídas com teclas sintéticas encaminhadas pelo script Lua
+  (`hl.dsp.send_shortcut`), perfil salvo em caminho temporário, reload ok;
+- `Esc`: abortou sem gravar perfil, removeu o mpv e o diretório temporário,
+  `cm_auto_hdr` voltou a `1`;
+- SIGTERM no meio da sessão: restauração confirmada, nenhum mpv órfão,
+  `cm_auto_hdr=1`;
+- watchdog: testes de crash e graceful passaram;
+- 117 testes unitários verdes.
+
+Os valores do smoke test (min 0.3565 nits, max 537, avg 181) **não** são uma
+calibração real: as teclas sintéticas geraram eventos duplicados/perdidos em
+alguns passos. Eles só provam a mecânica. O aceite visual real é uma sessão do
+usuário com teclado físico.
+
 ## Descobertas de ambiente
 
 ### `hyprctl keyword` não funciona com config Lua
@@ -78,11 +150,20 @@ script `scripts/generate_pq_pattern.py`. Verificado: após a geração,
 `ffprobe` reporta `color_transfer=smpte2084`, `color_primaries=bt2020`, e o mpv
 trata a imagem como PQ.
 
-**Impacto no M2:** o plano original dizia “PNG 16-bit via ffmpeg com metadados”.
-O FFmpeg não faz isso sozinho. O M2 deve continuar gerando os pixels via FFmpeg
-e pós-processar o `cICP` no próprio hdrcal, ou usar outro contêiner (por exemplo
-FFV1/MKV) com as tags corretas. A decisão final fica para o M2; a alternativa
-“confiar nas flags de cor do FFmpeg para PNG” foi rejeitada por evidência.
+**Decisão final do M2:** os padrões são gerados pelo próprio hdrcal em C++ com
+zlib e um chunk `cICP` explícito. Medições no ambiente de referência:
+
+- FFmpeg 9.0.1 leva ~0,10 s para um padrão 640×360 e ~0,30 s para 2560×1440,
+  por invocação, além do custo de decodificação no mpv;
+- o encoder PNG não grava `cICP`/`iCCP`/`sRGB`;
+- a cadeia `crop`/`scale`/`pad` do FFmpeg introduziu 1–3 LSB de erro em amostras
+  de 16 bits, o que é pequeno mas desnecessário para uma calibração.
+
+O gerador interno produz os 16 bits exatos, escreve atomicamente e leva poucos
+milissegundos. O FFmpeg continua sendo a referência do M0 e o formato foi
+validado com `ffprobe` (PQ/BT.2020). A alternativa “uma invocação de FFmpeg por
+passo” foi rejeitada por latência e pela impossibilidade de marcar o PNG
+diretamente.
 
 ### Consulta de ICC em runtime não existe no Hyprland 0.56.2
 
@@ -150,7 +231,7 @@ queda de energia não faz parte do aceite do M1.
 
 **Limitação:** o arquivo tem um perfil. Um segundo monitor sobrescreveria o
 primeiro. Multi-monitor não está no escopo do M1 e exigirá merge de tabela
-(provavelmente com leitura do arquivo existente) no M2/M4.
+(provavelmente com leitura do arquivo existente) no M4.
 
 ## Regra temporária e restauração
 
@@ -158,8 +239,7 @@ primeiro. Multi-monitor não está no escopo do M1 e exigirá merge de tabela
 `hl.monitor({ output = ..., min_luminance = 0, max_luminance = 10000, max_avg_luminance = 10000 })`
 via `hyprctl eval` e restaura com `hyprctl reload`. O guard é RAII: o destrutor
 restaura em saída normal e em exceção. Se uma restauração explícita falhar, o
-estado é mantido como aplicado e o destrutor tenta novamente. O wizard M2
-chamará `restore()` explicitamente antes de SIGINT/SIGTERM e no watchdog.
+estado é mantido como aplicado e o destrutor tenta novamente. O wizard chama `restore()` explicitamente antes de SIGINT/SIGTERM e no watchdog.
 
 **Por que `reload`:** ele relê a configuração do monitor (incluindo
 `monitors.lua` e `hdrcal.lua`) e reaplica a regra persistida. Reaplicar valores
@@ -169,9 +249,102 @@ capturados de `hyprctl monitors -j` não restaura `min_luminance`,
 **Alternativa rejeitada:** `hyprctl keyword monitor ...`. Não aceita os campos de
 luminância e não funciona com config Lua.
 
+### Semântica de merge do `hl.monitor` (Hyprland 0.56.2)
+
+**Fato verificado no fonte** (`src/config/lua/bindings/LuaBindingsConfigRules.cpp`,
+função `hlMonitor`):
+
+```cpp
+const auto existing = std::ranges::find_if(Config::monitorRuleMgr()->all(),
+                                           [&output](const auto& rule) { return rule.m_name == output; });
+if (existing != Config::monitorRuleMgr()->all().end())
+    parser.rule() = *existing;
+```
+
+Ou seja, a chamada parcial `hl.monitor({ output = "DP-2", min_luminance = ... })`
+**só faz merge** quando já existe uma regra cujo `m_name` é literalmente
+`"DP-2"`. A comparação é de igualdade de string, não de seletor estático. Uma
+regra por `desc:...`, `make:...` ou curinga (`""`) continua valendo para escolher
+o monitor (`CMonitorRuleManager::get` usa `matchesStaticSelector`), mas **não é
+copiada** no merge. Nesse caso o parser cria uma regra nova com os defaults de
+`CMonitorRule`: `m_enable10bit = false` e `m_cmType = CM_SRGB`, isto é, 8 bits e
+SDR.
+
+**Consequência:** aplicar a regra temporária em uma config chaveada por
+`desc:`/`make:` derrubaria o HDR para SDR no meio da medição, sem erro do
+Hyprland. O hdrcal trata isso como pré-requisito, não como detalhe interno.
+
+**Decisão (P1):**
+
+1. **Pré-checagem antes de qualquer alteração:** o guard lê o diretório de
+   configuração (mesma varredura textual usada pelo ICC) e exige uma regra com
+   `output` igual ao nome da saída, em Lua (`hl.monitor`, inclusive multi-linha)
+   ou no formato legado `monitor=DP-2,...` em `.conf`. Também consulta
+   `hyprctl monitors -j` para confirmar que a saída existe e está ativa. Se a
+   regra não existir, devolve erro pt-BR explicando o requisito e como ajustar
+   `monitors.lua`; o hdrcal **não** altera a config do usuário.
+2. **Pós-verificação obrigatória:** imediatamente antes do `eval`, o guard
+   captura `HDR_OUTPUT_METADATA.eotf`, `max bpc` (KMS) e `currentFormat`
+   (`hyprctl monitors -j`). Depois do `eval`, repete as duas leituras. Se
+   `max bpc` diminuiu, o `eotf` deixou de ser 2 ou o formato perdeu o sufixo
+   `2101010`, a regra é considerada degradante; o guard executa
+   `hyprctl reload`, devolve erro e deixa `m_applied = false` em caso de
+   restauração bem-sucedida. Se o próprio `reload` falhar, `m_applied` continua
+   verdadeiro para o destrutor tentar de novo — a garantia de restauração tem
+   precedência sobre o estado nominal, e o erro informa a nova tentativa.
+3. **Falha de leitura também restaura:** não conseguir reler KMS/Hyprland após
+   o `eval` é tratado como degradação, porque não há como garantir que a sessão
+   está em HDR.
+
+**Alternativa rejeitada:** confiar apenas no `reload` final. Ele restaura a
+config persistida, mas a sessão intermediária já teria medido lixo e o usuário
+teria visto a tela cair para SDR. **Alternativa rejeitada:** tentar “consertar”
+a config do usuário automaticamente (por exemplo, inserir uma regra por nome).
+Isso viola a seção 12 das instruções e muda o significado da configuração dele.
+
+## Portabilidade e versões mínimas (P2)
+
+O alvo passou a ser **Noctalia + Hyprland em qualquer distro**, com fallback
+suportado e testado em distros baseadas em Ubuntu (PikaOS no desenvolvimento).
+As escolhas:
+
+- **Hyprland ≥ 0.55**: piso para config Lua e `hyprctl eval`. O `preflight` lê
+  `hyprctl version`, interpreta `major.minor.patch` e reprova abaixo do piso.
+  Acima de **0.56.2** (única versão auditada) a verificação passa com aviso
+  explícito no detalhe, porque mudanças de comportamento do compositor não
+  podem ser presumidas.
+- **libdrm ≥ 2.4.99**: piso de `drmModeGetConnectorCurrent`, checado no
+  `pkg_check_modules(LIBDRM REQUIRED IMPORTED_TARGET libdrm>=2.4.99)` do CMake.
+- **GCC ≥ 11 / Clang ≥ 14**: piso de C++20 com designated initializers, ranges
+  e `charconv`, checado no configure do CMake e documentado no README.
+- **NVIDIA**: não testado; o código não contém nada específico de RADV, mas a
+  evidência do M0 é só RADV. O README declara a limitação em vez de prometer
+  paridade.
+
+### Multi-GPU sem escolha silenciosa
+
+`readKmsConnectorState` antes percorria `/dev/dri/card*` e aceitava o primeiro
+conector conectado com o nome pedido. Em um sistema com dois cards e o mesmo
+`DP-2` nos dois, isso escolhia um card arbitrário. A seleção foi extraída para
+`selectKmsCardForConnector`, que recebe a lista de cards e seus conectores
+conectados: zero matches é erro de “conector não encontrado”, mais de um match é
+erro de ambiguidade com **todos** os paths candidatos. A leitura de propriedades
+só acontece no card escolhido. O teste unitário injeta a lista e não exige GPU.
+
+### Caminho do perfil
+
+O caminho passou a seguir `--path`/`--profile-path` > `HDRICAL_PROFILE_PATH` >
+`$XDG_CONFIG_HOME/hypr/hdrcal.lua` (`$HOME/.config/hypr` como fallback). O
+motivo é concreto: o `require("hdrcal")` da config Lua resolve a partir do
+diretório de configuração do Hyprland, que pode ser diferente de
+`~/.config/hypr` em instalações fora do padrão ou em configs versionadas. A
+prioridade está no `--help`, no README e aqui, e a resolução pura tem teste
+unitário (`resolveProfilePath`).
+
 ## Pré-condições (seção 8.2)
 
-O preflight executa as cinco verificações, sempre reportando todas:
+O preflight executa as cinco verificações de HDR, sempre reportando todas, e em
+seguida a checagem de versão:
 
 1. `HDR_OUTPUT_METADATA.eotf == 2` via KMS.
 2. `max bpc == 10` via KMS **e** `currentFormat` contendo `2101010` via
@@ -179,6 +352,8 @@ O preflight executa as cinco verificações, sempre reportando todas:
 3. `render:cm_auto_hdr == 0`.
 4. nenhum ICC ativo (varredura conservadora, ver acima).
 5. `render:direct_scanout == 0`.
+6. `hyprctl version` interpretável e **≥ 0.55**; acima de 0.56.2 passa com
+   aviso, porque só a 0.56.2 foi auditada.
 
 A escolha de ler KMS em vez de confiar só no Hyprland é deliberada: o estado do
 compositor pode dizer `cm=hdr` enquanto o KMS ainda não recebeu metadata PQ.

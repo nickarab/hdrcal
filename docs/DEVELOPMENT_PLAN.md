@@ -40,8 +40,10 @@ padrões.
   `fsync` + `rename`).
 - `hypr`: wrapper de `hyprctl` (monitors JSON, reload, regra temporária com
   restauração garantida), injeção de comando fake nos testes.
-- `kms`: leitura read-only de `max bpc` e `HDR_OUTPUT_METADATA`.
-- `preflight`: as cinco pré-condições da seção 8.2.
+- `kms`: leitura read-only de `max bpc` e `HDR_OUTPUT_METADATA`, com seleção
+  de card que reprova ambiguidade multi-GPU.
+- `preflight`: as cinco pré-condições da seção 8.2 e checagem de versão do
+  Hyprland (≥ 0.55).
 - CLI: `profile write`, `preflight`, `probe`.
 
 **Critérios de aceite:**
@@ -51,7 +53,9 @@ padrões.
   `hdrcal.lua` correto;
 - nenhum teste exige GPU/compositor.
 
-**Estado:** concluído em 2026-10-19.
+**Estado:** concluído em 2026-10-19. Correções de portabilidade e segurança da
+regra temporária (P1–P3) aplicadas no mesmo dia; detalhes no `CHANGELOG.md` e
+em `docs/DESIGN_NOTES.md`.
 
 ## M2 — Wizard com backend mpv
 
@@ -59,7 +63,9 @@ padrões.
 
 **Entregas:**
 
-- gerador de padrões 16-bit BT.2020/PQ;
+- gerador de padrões 16-bit BT.2020/PQ (implementado no próprio hdrcal com zlib
+  e chunk `cICP`; a invocação de ffmpeg por passo foi rejeitada por latência e
+  por não gravar `cICP` — ver `DESIGN_NOTES`);
 - IPC do mpv (`--target-colorspace-hint=yes`);
 - três fases (minimum luminance, maximum luminance, maximum full-frame
   luminance) com ←/→ (passo 1 código), Shift para passo grosso, Enter salva,
@@ -75,8 +81,11 @@ padrões.
 - o perfil sobrevive a reboot/reload;
 - restauração confirmada em todos os caminhos de saída.
 
-**Estado:** pendente. Depende de decisão do usuário sobre a integração em
-`monitors.lua` (o projeto não a altera sem pedido explícito).
+**Estado:** implementado e smoke-testado em 2026-10-19. A mecânica foi
+validada ao vivo (três fases via teclas do mpv, perfil gravado, reload, `Esc`,
+SIGTERM e watchdog matando mpv órfão). O aceite final depende de uma sessão
+visual real do usuário e da integração explícita em `monitors.lua` (o projeto
+não altera essa configuração sem pedido).
 
 ## M3 — App nativo Vulkan/Wayland
 

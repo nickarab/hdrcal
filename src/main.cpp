@@ -5,10 +5,13 @@
 #include "hdrcal/number_format.hpp"
 #include "hdrcal/preflight.hpp"
 #include "hdrcal/profile.hpp"
+#include "hdrcal/wizard_session.hpp"
 
 #include <algorithm>
 #include <charconv>
 #include <chrono>
+#include <cmath>
+#include <csignal>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -100,7 +103,7 @@ std::filesystem::path defaultConfigDirectory() {
 }
 
 std::filesystem::path defaultProfilePath() {
-    return defaultConfigDirectory() / "hdrcal.lua";
+    return hdrcal::resolveProfilePath(std::nullopt, hdrcal::readProfilePathEnvironmentOverride(), defaultConfigDirectory() / "hdrcal.lua");
 }
 
 void printUsage() {
@@ -109,14 +112,16 @@ void printUsage() {
     std::cout << "  hdrcal profile write --output <nome> --min <nits> --max <nits> --avg <nits>\n";
     std::cout << "                        [--osd-brightness <0-100>] [--osd-contrast <0-100>]\n";
     std::cout << "                        [--osd-color-preset <nome>] [--path <arquivo>] [--no-reload]\n";
+    std::cout << "  hdrcal wizard --output <nome> [--profile-path <arquivo>] [--config-dir <diretório>]\n";
     std::cout << "  hdrcal preflight --output <nome> [--config-dir <diretório>]\n";
     std::cout << "  hdrcal probe --output <nome>\n";
     std::cout << "  hdrcal --help\n\n";
+    std::cout << "Caminho do perfil (prioridade): --path/--profile-path > HDRICAL_PROFILE_PATH > XDG.\n\n";
     std::cout << "Exemplo:\n";
     std::cout << "  hdrcal profile write --output DP-2 --min 0.02 --max 600 --avg 350\n";
 }
 
-std::optional<std::string> requireValue(const ParsedOptions& options, std::string_view name) {
+std::optional<std::string> findMissingValueError(const ParsedOptions& options, std::string_view name) {
     const auto iterator = options.values.find(std::string(name));
     if (iterator == options.values.end())
         return "a opção --" + std::string(name) + " é obrigatória";
@@ -132,7 +137,7 @@ int runProfileWrite(const std::vector<std::string>& arguments) {
     }
 
     for (const std::string_view required : {"output", "min", "max", "avg"}) {
-        if (const auto missing = requireValue(options, required); missing.has_value()) {
+        if (const auto missing = findMissingValueError(options, required); missing.has_value()) {
             std::cerr << "erro: " << *missing << "\n";
             return 2;
         }
@@ -217,7 +222,7 @@ int runPreflight(const std::vector<std::string>& arguments) {
         std::cerr << "erro: " << *options.error << "\n";
         return 2;
     }
-    if (const auto missing = requireValue(options, "output"); missing.has_value()) {
+    if (const auto missing = findMissingValueError(options, "output"); missing.has_value()) {
         std::cerr << "erro: " << *missing << "\n";
         return 2;
     }
@@ -240,7 +245,7 @@ int runProbe(const std::vector<std::string>& arguments) {
         std::cerr << "erro: " << *options.error << "\n";
         return 2;
     }
-    if (const auto missing = requireValue(options, "output"); missing.has_value()) {
+    if (const auto missing = findMissingValueError(options, "output"); missing.has_value()) {
         std::cerr << "erro: " << *missing << "\n";
         return 2;
     }
@@ -274,6 +279,54 @@ int runProbe(const std::vector<std::string>& arguments) {
     return 0;
 }
 
+int runWizard(const std::vector<std::string>& arguments) {
+    const ParsedOptions options = parseOptions(arguments, 1, {"output", "profile-path", "config-dir"}, {});
+    if (options.error.has_value()) {
+        std::cerr << "erro: " << *options.error << "\n";
+        return 2;
+    }
+    if (const auto missing = findMissingValueError(options, "output"); missing.has_value()) {
+        std::cerr << "erro: " << *missing << "\n";
+        return 2;
+    }
+
+    hdrcal::WizardOptions wizardOptions;
+    wizardOptions.outputName = options.values.at("output");
+    wizardOptions.profilePath = options.values.contains("profile-path") ? std::filesystem::path(options.values.at("profile-path")) : defaultProfilePath();
+    wizardOptions.hyprlandConfigDirectory =
+        options.values.contains("config-dir") ? std::filesystem::path(options.values.at("config-dir")) : defaultConfigDirectory();
+
+    const hdrcal::WizardOutcome outcome = hdrcal::runCalibrationWizard(wizardOptions);
+
+    if (outcome.completed)
+        std::cout << "\nCalibração concluída. Perfil salvo em " << outcome.savedProfilePath.string() << "\n";
+    else if (outcome.aborted)
+        std::cout << "\nCalibração abortada; sessão restaurada.\n";
+
+    if (outcome.phaseResults.size() == 3) {
+        const int maximumNits = std::max(1, static_cast<int>(std::lround(outcome.phaseResults.at(1).luminanceNits)));
+        const int averageNits = std::max(1, static_cast<int>(std::lround(outcome.phaseResults.at(2).luminanceNits)));
+
+        std::cout << "  min_luminance = " << hdrcal::formatLocaleIndependentDouble(outcome.phaseResults.at(0).luminanceNits) << "\n";
+        std::cout << "  max_luminance = " << maximumNits << "\n";
+        std::cout << "  max_avg_luminance = " << averageNits << "\n";
+        std::cout << "Para jogos: min_luminance=" << hdrcal::formatLocaleIndependentDouble(outcome.phaseResults.at(0).luminanceNits)
+                  << " max_luminance=" << maximumNits << " max_avg_luminance=" << averageNits << "\n";
+    }
+
+    if (outcome.error.has_value())
+        std::cerr << "erro: " << *outcome.error << "\n";
+
+    if (outcome.terminationSignal != 0) {
+        std::cerr << "Interrompido pelo sinal " << outcome.terminationSignal << "; sessão restaurada.\n";
+        std::signal(outcome.terminationSignal, SIG_DFL);
+        std::raise(outcome.terminationSignal);
+        return 1;
+    }
+
+    return outcome.completed ? 0 : 1;
+}
+
 } // namespace
 
 int main(int argumentCount, char** argumentValues) {
@@ -286,6 +339,9 @@ int main(int argumentCount, char** argumentValues) {
 
     if (arguments[0] == "profile" && arguments.size() >= 2 && arguments[1] == "write")
         return runProfileWrite(arguments);
+
+    if (arguments[0] == "wizard")
+        return runWizard(arguments);
 
     if (arguments[0] == "preflight")
         return runPreflight(arguments);

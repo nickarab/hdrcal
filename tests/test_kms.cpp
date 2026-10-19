@@ -42,3 +42,40 @@ HDRCAL_TEST(testParseHdrOutputMetadataBlob_Null_ReturnsError) {
     HDRCAL_REQUIRE(!result.value.has_value());
     HDRCAL_REQUIRE(result.error.has_value());
 }
+
+HDRCAL_TEST(testSelectKmsCardForConnector_UniqueMatch_ReturnsCardPath) {
+    const std::vector<hdrcal::KmsCardConnectorList> cards = {
+        {.cardPath = "/dev/dri/card0", .connectedConnectorNames = {"eDP-1"}},
+        {.cardPath = "/dev/dri/card1", .connectedConnectorNames = {"DP-2", "HDMI-A-1"}},
+    };
+
+    const hdrcal::KmsCardSelectionResult result = hdrcal::selectKmsCardForConnector(cards, "DP-2");
+    HDRCAL_REQUIRE(result.cardPath.has_value());
+    HDRCAL_REQUIRE_EQ(*result.cardPath, std::string("/dev/dri/card1"));
+    HDRCAL_REQUIRE(!result.error.has_value());
+}
+
+HDRCAL_TEST(testSelectKmsCardForConnector_NoMatch_ReturnsError) {
+    const std::vector<hdrcal::KmsCardConnectorList> cards = {
+        {.cardPath = "/dev/dri/card0", .connectedConnectorNames = {"eDP-1"}},
+    };
+
+    const hdrcal::KmsCardSelectionResult result = hdrcal::selectKmsCardForConnector(cards, "DP-2");
+    HDRCAL_REQUIRE(!result.cardPath.has_value());
+    HDRCAL_REQUIRE(result.error.has_value());
+    HDRCAL_REQUIRE(result.error->find("DP-2") != std::string::npos);
+}
+
+HDRCAL_TEST(testSelectKmsCardForConnector_AmbiguousName_ReportsEveryCardPath) {
+    const std::vector<hdrcal::KmsCardConnectorList> cards = {
+        {.cardPath = "/dev/dri/card0", .connectedConnectorNames = {"DP-2"}},
+        {.cardPath = "/dev/dri/card1", .connectedConnectorNames = {"DP-2"}},
+    };
+
+    const hdrcal::KmsCardSelectionResult result = hdrcal::selectKmsCardForConnector(cards, "DP-2");
+    HDRCAL_REQUIRE(!result.cardPath.has_value());
+    HDRCAL_REQUIRE(result.error.has_value());
+    HDRCAL_REQUIRE(result.error->find("mais de um card") != std::string::npos);
+    HDRCAL_REQUIRE(result.error->find("/dev/dri/card0") != std::string::npos);
+    HDRCAL_REQUIRE(result.error->find("/dev/dri/card1") != std::string::npos);
+}

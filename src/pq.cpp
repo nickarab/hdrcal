@@ -17,11 +17,11 @@ double computeLuminanceFromPqCode(double pqCode) {
 
     // Inverse of the ST 2084 EOTF. The denominator is strictly positive for
     // every code in [0, 1].
-    const double powered = std::pow(code, 1.0 / kPqM2);
-    const double numerator = std::max(powered - kPqC1, 0.0);
-    const double denominator = kPqC2 - kPqC3 * powered;
+    const double powered = std::pow(code, 1.0 / kPqM2SignalExponent);
+    const double numerator = std::max(powered - kPqC1RationalOffset, 0.0);
+    const double denominator = kPqC2RationalNumeratorScale - kPqC3RationalDenominatorScale * powered;
 
-    return kPqMaximumDisplayLuminanceNits * std::pow(numerator / denominator, 1.0 / kPqM1);
+    return kPqMaximumDisplayLuminanceNits * std::pow(numerator / denominator, 1.0 / kPqM1LuminanceExponent);
 }
 
 double computePqCodeFromLuminance(double luminanceNits) {
@@ -32,8 +32,8 @@ double computePqCodeFromLuminance(double luminanceNits) {
     if (normalized == 0.0)
         return 0.0;
 
-    const double powered = std::pow(normalized, kPqM1);
-    return std::pow((kPqC1 + kPqC2 * powered) / (1.0 + kPqC3 * powered), kPqM2);
+    const double powered = std::pow(normalized, kPqM1LuminanceExponent);
+    return std::pow((kPqC1RationalOffset + kPqC2RationalNumeratorScale * powered) / (1.0 + kPqC3RationalDenominatorScale * powered), kPqM2SignalExponent);
 }
 
 std::uint16_t computeTenBitSampleFromPqCode(double pqCode) {

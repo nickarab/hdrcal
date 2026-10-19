@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -93,6 +94,26 @@ DrmCardPathList collectDrmCardPaths() {
     return result;
 }
 
+bool collectCardConnectorNames(const std::string& cardPath, std::vector<std::string>& connectorNames) {
+    UniqueFileDescriptor device(::open(cardPath.c_str(), O_RDONLY | O_CLOEXEC));
+    if (device.get() < 0)
+        return false;
+
+    DrmResourcesPtr resources(drmModeGetResources(device.get()));
+    if (!resources)
+        return false;
+
+    for (int connectorIndex = 0; connectorIndex < resources->count_connectors; ++connectorIndex) {
+        DrmConnectorPtr connector(drmModeGetConnectorCurrent(device.get(), resources->connectors[connectorIndex]));
+        if (!connector || connector->connection != DRM_MODE_CONNECTED)
+            continue;
+
+        connectorNames.push_back(makeConnectorName(connector->connector_type, connector->connector_type_id));
+    }
+
+    return true;
+}
+
 } // namespace
 
 std::string makeConnectorName(std::uint32_t connectorType, std::uint32_t connectorTypeId) {
@@ -144,6 +165,30 @@ std::string makeConnectorName(std::uint32_t connectorType, std::uint32_t connect
     }
 }
 
+KmsCardSelectionResult selectKmsCardForConnector(const std::vector<KmsCardConnectorList>& cards, const std::string& outputName) {
+    std::vector<std::string> matchingCardPaths;
+    for (const KmsCardConnectorList& card : cards) {
+        if (std::find(card.connectedConnectorNames.begin(), card.connectedConnectorNames.end(), outputName) != card.connectedConnectorNames.end())
+            matchingCardPaths.push_back(card.cardPath);
+    }
+
+    if (matchingCardPaths.empty())
+        return {std::nullopt, "conector KMS ativo '" + outputName + "' não encontrado em /dev/dri/card*"};
+
+    if (matchingCardPaths.size() > 1) {
+        std::string message = "conector KMS '" + outputName + "' encontrado em mais de um card (";
+        for (std::size_t index = 0; index < matchingCardPaths.size(); ++index) {
+            if (index > 0)
+                message += ", ";
+            message += matchingCardPaths[index];
+        }
+        message += "); não é possível escolher o dispositivo sem ambiguidade";
+        return {std::nullopt, std::move(message)};
+    }
+
+    return {matchingCardPaths.front(), std::nullopt};
+}
+
 KmsHdrMetadataResult parseHdrOutputMetadataBlob(const std::uint8_t* data, std::size_t size) {
     if (data == nullptr)
         return {std::nullopt, "blob HDR_OUTPUT_METADATA nulo"};
@@ -166,65 +211,75 @@ KmsReadResult readKmsConnectorState(const std::string& outputName) {
     if (cardPathList.cardPaths.empty())
         return {std::nullopt, "nenhum dispositivo /dev/dri/card* acessível"};
 
+    std::vector<KmsCardConnectorList> cards;
     for (const std::string& cardPath : cardPathList.cardPaths) {
-        UniqueFileDescriptor device(::open(cardPath.c_str(), O_RDONLY | O_CLOEXEC));
-        if (device.get() < 0)
-            continue;
-
-        DrmResourcesPtr resources(drmModeGetResources(device.get()));
-        if (!resources)
-            continue;
-
-        for (int connectorIndex = 0; connectorIndex < resources->count_connectors; ++connectorIndex) {
-            DrmConnectorPtr connector(drmModeGetConnectorCurrent(device.get(), resources->connectors[connectorIndex]));
-            if (!connector || connector->connection != DRM_MODE_CONNECTED)
-                continue;
-
-            const std::string connectorName = makeConnectorName(connector->connector_type, connector->connector_type_id);
-            if (connectorName != outputName)
-                continue;
-
-            KmsConnectorState state;
-            state.connectorName = connectorName;
-
-            DrmPropertiesPtr properties(drmModeObjectGetProperties(device.get(), connector->connector_id, DRM_MODE_OBJECT_CONNECTOR));
-            if (!properties)
-                return {std::nullopt, "não foi possível ler as propriedades KMS do conector " + connectorName};
-
-            for (std::uint32_t propertyIndex = 0; propertyIndex < properties->count_props; ++propertyIndex) {
-                DrmPropertyPtr property(drmModeGetProperty(device.get(), properties->props[propertyIndex]));
-                if (!property)
-                    continue;
-
-                const std::string propertyName = property->name;
-                const std::uint64_t propertyValue = properties->prop_values[propertyIndex];
-
-                if (propertyName == "max bpc") {
-                    state.maximumBitsPerComponent = static_cast<int>(propertyValue);
-                    continue;
-                }
-
-                if (propertyName != "HDR_OUTPUT_METADATA" || propertyValue == 0)
-                    continue;
-
-                DrmBlobPtr blob(drmModeGetPropertyBlob(device.get(), propertyValue));
-                if (!blob)
-                    continue;
-
-                const KmsHdrMetadataResult parsed = parseHdrOutputMetadataBlob(static_cast<const std::uint8_t*>(blob->data), blob->length);
-                if (!parsed.value)
-                    continue;
-
-                state.hdrEotf = parsed.value->eotf;
-                state.maximumContentLightLevel = parsed.value->maximumContentLightLevel;
-                state.maximumFrameAverageLightLevel = parsed.value->maximumFrameAverageLightLevel;
-            }
-
-            return {state, std::nullopt};
-        }
+        KmsCardConnectorList card;
+        card.cardPath = cardPath;
+        if (collectCardConnectorNames(cardPath, card.connectedConnectorNames))
+            cards.push_back(std::move(card));
     }
 
-    return {std::nullopt, "conector KMS ativo '" + outputName + "' não encontrado em /dev/dri/card*"};
+    const KmsCardSelectionResult selection = selectKmsCardForConnector(cards, outputName);
+    if (!selection.cardPath)
+        return {std::nullopt, selection.error.value_or("não foi possível selecionar o card KMS")};
+
+    UniqueFileDescriptor device(::open(selection.cardPath->c_str(), O_RDONLY | O_CLOEXEC));
+    if (device.get() < 0)
+        return {std::nullopt, "não foi possível abrir " + *selection.cardPath + " para leitura KMS"};
+
+    DrmResourcesPtr resources(drmModeGetResources(device.get()));
+    if (!resources)
+        return {std::nullopt, "não foi possível ler os recursos KMS de " + *selection.cardPath};
+
+    for (int connectorIndex = 0; connectorIndex < resources->count_connectors; ++connectorIndex) {
+        DrmConnectorPtr connector(drmModeGetConnectorCurrent(device.get(), resources->connectors[connectorIndex]));
+        if (!connector || connector->connection != DRM_MODE_CONNECTED)
+            continue;
+
+        const std::string connectorName = makeConnectorName(connector->connector_type, connector->connector_type_id);
+        if (connectorName != outputName)
+            continue;
+
+        KmsConnectorState state;
+        state.connectorName = connectorName;
+
+        DrmPropertiesPtr properties(drmModeObjectGetProperties(device.get(), connector->connector_id, DRM_MODE_OBJECT_CONNECTOR));
+        if (!properties)
+            return {std::nullopt, "não foi possível ler as propriedades KMS do conector " + connectorName};
+
+        for (std::uint32_t propertyIndex = 0; propertyIndex < properties->count_props; ++propertyIndex) {
+            DrmPropertyPtr property(drmModeGetProperty(device.get(), properties->props[propertyIndex]));
+            if (!property)
+                continue;
+
+            const std::string propertyName = property->name;
+            const std::uint64_t propertyValue = properties->prop_values[propertyIndex];
+
+            if (propertyName == "max bpc") {
+                state.maximumBitsPerComponent = static_cast<int>(propertyValue);
+                continue;
+            }
+
+            if (propertyName != "HDR_OUTPUT_METADATA" || propertyValue == 0)
+                continue;
+
+            DrmBlobPtr blob(drmModeGetPropertyBlob(device.get(), propertyValue));
+            if (!blob)
+                continue;
+
+            const KmsHdrMetadataResult parsed = parseHdrOutputMetadataBlob(static_cast<const std::uint8_t*>(blob->data), blob->length);
+            if (!parsed.value)
+                continue;
+
+            state.hdrEotf = parsed.value->eotf;
+            state.maximumContentLightLevel = parsed.value->maximumContentLightLevel;
+            state.maximumFrameAverageLightLevel = parsed.value->maximumFrameAverageLightLevel;
+        }
+
+        return {state, std::nullopt};
+    }
+
+    return {std::nullopt, "conector KMS ativo '" + outputName + "' não encontrado em " + *selection.cardPath};
 }
 
 } // namespace hdrcal

@@ -7,6 +7,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace hdrcal {
 
@@ -41,6 +42,24 @@ struct KmsReadResult {
 // Builds the Hyprland-style connector name from the DRM connector type and
 // type id, for example (DisplayPort, 2) -> "DP-2".
 [[nodiscard]] std::string makeConnectorName(std::uint32_t connectorType, std::uint32_t connectorTypeId);
+
+// Connected connector names found on one DRM card. Used to choose the card
+// before reading a connector, so a multi-GPU system cannot silently report the
+// wrong output when two cards expose the same connector name.
+struct KmsCardConnectorList {
+    std::string cardPath;
+    std::vector<std::string> connectedConnectorNames;
+};
+
+struct KmsCardSelectionResult {
+    std::optional<std::string> cardPath;
+    std::optional<std::string> error;
+};
+
+// Selects the single card that exposes outputName. Zero matches and more than
+// one match are errors; ambiguity reports every candidate card path instead of
+// picking the first one.
+[[nodiscard]] KmsCardSelectionResult selectKmsCardForConnector(const std::vector<KmsCardConnectorList>& cards, const std::string& outputName);
 
 // Decodes a raw HDR_OUTPUT_METADATA blob. The input is copied into the kernel
 // struct, so unaligned buffers are safe.

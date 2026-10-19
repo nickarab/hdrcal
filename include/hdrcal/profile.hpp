@@ -57,6 +57,19 @@ struct RenderedLuaTable {
 // either contains the complete new profile or the previous complete profile.
 [[nodiscard]] std::optional<std::string> saveProfileToPath(const CalibrationProfile& profile, const std::filesystem::path& destinationPath);
 
+// Environment variable that overrides the hdrcal.lua location when the CLI
+// option (--path / --profile-path) is absent. Required because `require("hdrcal")`
+// resolves from the Lua config directory, which may not be ~/.config/hypr.
+inline constexpr std::string_view kProfilePathEnvironmentVariable = "HDRICAL_PROFILE_PATH";
+
+// Reads kProfilePathEnvironmentVariable. An empty value is treated as absent.
+[[nodiscard]] std::optional<std::filesystem::path> readProfilePathEnvironmentOverride();
+
+// Resolves the profile path with priority: command line > environment > the
+// caller-provided default (XDG config directory). Empty paths are ignored.
+[[nodiscard]] std::filesystem::path resolveProfilePath(const std::optional<std::filesystem::path>& commandLinePath,
+                                                       const std::optional<std::filesystem::path>& environmentPath, const std::filesystem::path& defaultPath);
+
 // Formats a system-clock instant as UTC ISO 8601 with second precision, for
 // example "2026-10-19T21:00:00Z". Uses gmtime_r and numeric formatting only, so
 // the process locale cannot change the output.

@@ -3,7 +3,9 @@
 #pragma once
 
 #include "hdrcal/command.hpp"
+#include "hdrcal/kms.hpp"
 
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <string>
@@ -17,6 +19,14 @@ namespace hdrcal {
 inline constexpr double kCalibrationMinimumLuminanceNits = 0.0;
 inline constexpr int kCalibrationMaximumLuminanceNits = 10000;
 inline constexpr int kCalibrationMaximumFullFrameLuminanceNits = 10000;
+
+// Version floor and audited ceiling for the Hyprland Lua configuration and
+// `hyprctl eval` support used by this project.
+inline constexpr int kMinimumHyprlandMajorVersion = 0;
+inline constexpr int kMinimumHyprlandMinorVersion = 55;
+inline constexpr int kAuditedHyprlandMajorVersion = 0;
+inline constexpr int kAuditedHyprlandMinorVersion = 56;
+inline constexpr int kAuditedHyprlandPatchVersion = 2;
 
 struct HyprOptionValue {
     enum class Type { Integer, Boolean, FloatingPoint, String };
@@ -37,12 +47,37 @@ struct HyprMonitorSummary {
     std::string name;
     std::string currentFormat;
     std::string colorManagementPreset;
+    int width = 0;
+    int height = 0;
     bool enabled = false;
 };
 
 struct HyprMonitorListResult {
     std::optional<std::vector<HyprMonitorSummary>> value;
     std::optional<std::string> error;
+};
+
+struct HyprlandVersion {
+    int major = 0;
+    int minor = 0;
+    int patch = 0;
+    std::string raw;
+};
+
+struct HyprlandVersionResult {
+    std::optional<HyprlandVersion> value;
+    std::optional<std::string> error;
+};
+
+// Negative when left is older than right; zero when both versions are equal.
+[[nodiscard]] int compareHyprlandVersions(const HyprlandVersion& left, const HyprlandVersion& right);
+
+// HDR-relevant state observed before and after applying the temporary rule.
+// Used to detect a silent fallback to SDR or 8-bit.
+struct MonitorHdrState {
+    int maximumBitsPerComponent = 0;
+    std::optional<int> hdrEotf;
+    std::string currentFormat;
 };
 
 // Thin, injectable wrapper around the `hyprctl` binary. All methods are
@@ -57,6 +92,7 @@ public:
 
     [[nodiscard]] HyprOptionReadResult readOption(std::string_view optionName) const;
     [[nodiscard]] HyprMonitorListResult listMonitors() const;
+    [[nodiscard]] HyprlandVersionResult readVersion() const;
 
     // Asks Hyprland to re-read its configuration. Returns std::nullopt on
     // success.
@@ -71,14 +107,17 @@ private:
     CommandExecutor m_executor;
 };
 
-// RAII guard for the temporary calibration rule. The destructor restores the
-// previous monitor configuration with `hyprctl reload`, so normal exits,
-// exceptions and explicit cancel paths all restore the session. Signal and
-// watchdog handling belongs to the interactive wizard (M2), which will call
-// restore() before re-raising the signal.
+// RAII guard for the temporary calibration rule. Before touching the session it
+// verifies that a monitor rule named exactly like the output exists, because
+// Hyprland's partial `hl.monitor` merge only copies such a rule. After applying,
+// it re-reads KMS and Hyprland state and restores immediately if HDR or 10-bit
+// output degraded. The destructor restores the previous monitor configuration
+// with `hyprctl reload`, so normal exits, exceptions and explicit cancel paths
+// all restore the session. Signal and watchdog handling belongs to the
+// interactive wizard (M2), which calls restore() before re-raising the signal.
 class TemporaryLuminanceRule {
 public:
-    explicit TemporaryLuminanceRule(const HyprController& controller) noexcept;
+    TemporaryLuminanceRule(const HyprController& controller, KmsConnectorReader kmsReader, std::filesystem::path hyprlandConfigDirectory) noexcept;
     ~TemporaryLuminanceRule();
 
     TemporaryLuminanceRule(const TemporaryLuminanceRule&) = delete;
@@ -91,6 +130,8 @@ public:
 
 private:
     const HyprController* m_controller;
+    KmsConnectorReader m_kmsReader;
+    std::filesystem::path m_hyprlandConfigDirectory;
     bool m_applied = false;
 };
 

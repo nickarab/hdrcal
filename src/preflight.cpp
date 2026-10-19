@@ -2,15 +2,15 @@
 
 #include "hdrcal/preflight.hpp"
 
+#include "hdrcal/hypr_config.hpp"
 #include "hdrcal/number_format.hpp"
 
 #include <algorithm>
 #include <cctype>
-#include <fstream>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <system_error>
+#include <utility>
 #include <vector>
 
 namespace hdrcal {
@@ -19,80 +19,6 @@ namespace {
 bool isIdentifierCharacter(char character) {
     const unsigned char value = static_cast<unsigned char>(character);
     return std::isalnum(value) != 0 || character == '_';
-}
-
-// Removes Lua line comments and the simple --[[ ]] block form, preserving
-// quoted strings. Long-bracket comments with additional equals signs (--[=[)
-// are not interpreted; they are not used by the target configuration.
-std::string stripLineComment(std::string_view line, bool luaStyle, bool& insideLuaBlockComment) {
-    if (!luaStyle)
-        return std::string(line.substr(0, line.find('#')));
-
-    std::string result;
-    result.reserve(line.size());
-
-    bool insideSingleQuote = false;
-    bool insideDoubleQuote = false;
-    bool escaped = false;
-
-    for (std::size_t index = 0; index < line.size();) {
-        const char character = line[index];
-
-        if (insideLuaBlockComment) {
-            const std::size_t blockEnd = line.find("]]", index);
-            if (blockEnd == std::string_view::npos)
-                return result;
-            insideLuaBlockComment = false;
-            index = blockEnd + 2;
-            continue;
-        }
-
-        if (escaped) {
-            result.push_back(character);
-            escaped = false;
-            ++index;
-            continue;
-        }
-
-        if ((insideSingleQuote || insideDoubleQuote) && character == '\\') {
-            result.push_back(character);
-            escaped = true;
-            ++index;
-            continue;
-        }
-
-        if (character == '\'' && !insideDoubleQuote) {
-            insideSingleQuote = !insideSingleQuote;
-            result.push_back(character);
-            ++index;
-            continue;
-        }
-
-        if (character == '"' && !insideSingleQuote) {
-            insideDoubleQuote = !insideDoubleQuote;
-            result.push_back(character);
-            ++index;
-            continue;
-        }
-
-        if (!insideSingleQuote && !insideDoubleQuote && character == '-' && index + 1 < line.size() && line[index + 1] == '-') {
-            if (index + 2 < line.size() && line[index + 2] == '[') {
-                const std::size_t blockEnd = line.find("]]", index + 3);
-                if (blockEnd == std::string_view::npos) {
-                    insideLuaBlockComment = true;
-                    return result;
-                }
-                index = blockEnd + 2;
-                continue;
-            }
-            break;
-        }
-
-        result.push_back(character);
-        ++index;
-    }
-
-    return result;
 }
 
 std::optional<std::string> findActiveIccValue(std::string_view line) {
@@ -169,55 +95,14 @@ struct IccScanResult {
 };
 
 IccScanResult scanConfigDirectoryForActiveIcc(const std::filesystem::path& configDirectory) {
-    std::error_code filesystemError;
-    if (!std::filesystem::exists(configDirectory, filesystemError)) {
-        if (filesystemError)
-            return {std::nullopt, "não foi possível verificar o diretório de configuração: " + filesystemError.message()};
-        return {std::nullopt, std::nullopt};
-    }
+    const HyprConfigLinesResult configLines = readHyprConfigLines(configDirectory);
+    if (configLines.error.has_value())
+        return {std::nullopt, *configLines.error};
 
-    std::vector<std::filesystem::path> configFiles;
-    std::filesystem::recursive_directory_iterator iterator(configDirectory, std::filesystem::directory_options::skip_permission_denied, filesystemError);
-    if (filesystemError)
-        return {std::nullopt, "não foi possível percorrer o diretório de configuração: " + filesystemError.message()};
-
-    const std::filesystem::recursive_directory_iterator end;
-    while (iterator != end) {
-        const std::filesystem::directory_entry& entry = *iterator;
-        std::error_code entryError;
-        if (entry.is_regular_file(entryError)) {
-            const std::string extension = entry.path().extension().string();
-            if (extension == ".lua" || extension == ".conf")
-                configFiles.push_back(entry.path());
-        } else if (entryError) {
-            return {std::nullopt, "não foi possível inspecionar " + entry.path().string() + ": " + entryError.message()};
-        }
-
-        iterator.increment(filesystemError);
-        if (filesystemError)
-            return {std::nullopt, "não foi possível percorrer o diretório de configuração: " + filesystemError.message()};
-    }
-
-    std::sort(configFiles.begin(), configFiles.end());
-
-    for (const std::filesystem::path& configFile : configFiles) {
-        std::ifstream input(configFile);
-        if (!input.is_open())
-            return {std::nullopt, "não foi possível ler o arquivo de configuração: " + configFile.string()};
-
-        const bool luaStyle = configFile.extension() == ".lua";
-        bool insideLuaBlockComment = false;
-        std::string line;
-        std::size_t lineNumber = 0;
-
-        while (std::getline(input, line)) {
-            ++lineNumber;
-            const std::string relevant = stripLineComment(line, luaStyle, insideLuaBlockComment);
-            const std::optional<std::string> value = findActiveIccValue(relevant);
-            if (value.has_value()) {
-                return {configFile.string() + ":" + std::to_string(lineNumber) + " (icc = " + *value + ")", std::nullopt};
-            }
-        }
+    for (const HyprConfigLine& line : configLines.lines) {
+        const std::optional<std::string> value = findActiveIccValue(line.text);
+        if (value.has_value())
+            return {line.filePath.string() + ":" + std::to_string(line.lineNumber) + " (icc = " + *value + ")", std::nullopt};
     }
 
     return {std::nullopt, std::nullopt};
@@ -326,6 +211,28 @@ PreflightResult checkHdrPreconditions(const HyprController& controller, const st
     else
         result.checks.push_back(makeCheck("Direct scanout desligado", optionIsDisabled(*directScanout.value),
                                           "render:direct_scanout=" + describeOptionValue(*directScanout.value) + ", esperado 0"));
+
+    const HyprlandVersionResult version = controller.readVersion();
+    if (!version.value) {
+        result.checks.push_back(makeCheck("Versão do Hyprland compatível (>= 0.55)", false, version.error.value_or("hyprctl version falhou")));
+    } else {
+        const HyprlandVersion floorVersion{.major = kMinimumHyprlandMajorVersion, .minor = kMinimumHyprlandMinorVersion, .patch = 0, .raw = {}};
+        const HyprlandVersion auditedVersion{
+            .major = kAuditedHyprlandMajorVersion, .minor = kAuditedHyprlandMinorVersion, .patch = kAuditedHyprlandPatchVersion, .raw = {}};
+
+        if (compareHyprlandVersions(*version.value, floorVersion) < 0) {
+            result.checks.push_back(
+                makeCheck("Versão do Hyprland compatível (>= 0.55)", false,
+                          "Hyprland " + version.value->raw + " é anterior ao mínimo 0.55 exigido pela configuração Lua e por hyprctl eval"));
+        } else {
+            std::string detail = "Hyprland " + version.value->raw;
+            if (compareHyprlandVersions(*version.value, auditedVersion) > 0)
+                detail += " — versão mais nova que a auditada 0.56.2; recursos novos podem mudar o comportamento";
+            else
+                detail += " (auditada: 0.56.2)";
+            result.checks.push_back(makeCheck("Versão do Hyprland compatível (>= 0.55)", true, std::move(detail)));
+        }
+    }
 
     return result;
 }

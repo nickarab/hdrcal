@@ -2,22 +2,18 @@
 
 #include "hdrcal/profile.hpp"
 
+#include "hdrcal/atomic_file.hpp"
 #include "hdrcal/number_format.hpp"
 #include "hdrcal/pq.hpp"
-#include "hdrcal/unique_fd.hpp"
 
 #include <algorithm>
-#include <cerrno>
 #include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
-#include <cstring>
+#include <cstdlib>
 #include <ctime>
-#include <fcntl.h>
 #include <string>
-#include <system_error>
-#include <unistd.h>
 
 namespace hdrcal {
 namespace {
@@ -209,51 +205,23 @@ std::optional<std::string> saveProfileToPath(const CalibrationProfile& profile, 
     if (rendered.validationError.has_value())
         return rendered.validationError;
 
-    if (destinationPath.empty())
-        return "o caminho de destino do perfil não pode ser vazio";
+    return writeFileAtomically(destinationPath, rendered.content);
+}
 
-    std::error_code filesystemError;
-    const std::filesystem::path parentDirectory = destinationPath.parent_path();
-    if (!parentDirectory.empty()) {
-        std::filesystem::create_directories(parentDirectory, filesystemError);
-        if (filesystemError)
-            return "não foi possível criar o diretório do perfil: " + filesystemError.message();
-    }
+std::optional<std::filesystem::path> readProfilePathEnvironmentOverride() {
+    const char* environmentPath = std::getenv(std::string(kProfilePathEnvironmentVariable).c_str());
+    if (environmentPath == nullptr || *environmentPath == '\0')
+        return std::nullopt;
+    return std::filesystem::path(environmentPath);
+}
 
-    const std::string temporaryPath = destinationPath.string() + ".tmp." + std::to_string(static_cast<long long>(::getpid()));
-    UniqueFileDescriptor fileDescriptor(::open(temporaryPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644));
-    if (fileDescriptor.get() < 0)
-        return "não foi possível abrir o arquivo temporário do perfil: " + std::string(std::strerror(errno));
-
-    std::size_t bytesWritten = 0;
-    while (bytesWritten < rendered.content.size()) {
-        const ssize_t written = ::write(fileDescriptor.get(), rendered.content.data() + bytesWritten, rendered.content.size() - bytesWritten);
-        if (written < 0) {
-            if (errno == EINTR)
-                continue;
-            const std::string writeError = std::string(std::strerror(errno));
-            fileDescriptor.reset();
-            ::unlink(temporaryPath.c_str());
-            return "não foi possível escrever o perfil: " + writeError;
-        }
-        bytesWritten += static_cast<std::size_t>(written);
-    }
-
-    if (::fsync(fileDescriptor.get()) != 0) {
-        const std::string syncError = std::string(std::strerror(errno));
-        fileDescriptor.reset();
-        ::unlink(temporaryPath.c_str());
-        return "não foi possível sincronizar o perfil com o disco: " + syncError;
-    }
-    fileDescriptor.reset();
-
-    if (::rename(temporaryPath.c_str(), destinationPath.c_str()) != 0) {
-        const std::string renameError = std::string(std::strerror(errno));
-        ::unlink(temporaryPath.c_str());
-        return "não foi possível substituir o perfil de forma atômica: " + renameError;
-    }
-
-    return std::nullopt;
+std::filesystem::path resolveProfilePath(const std::optional<std::filesystem::path>& commandLinePath,
+                                         const std::optional<std::filesystem::path>& environmentPath, const std::filesystem::path& defaultPath) {
+    if (commandLinePath.has_value() && !commandLinePath->empty())
+        return *commandLinePath;
+    if (environmentPath.has_value() && !environmentPath->empty())
+        return *environmentPath;
+    return defaultPath;
 }
 
 std::string formatUtcTimestamp(std::chrono::system_clock::time_point timestamp) {

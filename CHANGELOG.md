@@ -49,6 +49,93 @@ existe. Datas em UTC.
   comandos nos testes.
 - CLI: `profile write`, `preflight`, `probe`.
 
+### M2 — wizard com backend mpv: implementado e smoke-testado
+
+- **Padrões:** gerador C++/zlib de PNG RGB 16-bit com `cICP` BT.2020/PQ,
+  resolução lida do monitor. Fase mínima com mancha central, máxima com xadrez
+  `código`/`código-16` e frame completo uniforme. Escrita atômica.
+- **Wizard:** máquina de estados pura (`CalibrationWizard`) com três fases,
+  códigos iniciais 100/700/592, passo 1 e passo grosso 10, `Enter` salva e
+  `Esc` aborta. Testes cobrem avanço, clamp, roundtrip de luminância e abort.
+- **mpv:** `MpvIpcClient` JSON sobre Unix socket, `MpvProcess` RAII, script Lua
+  embutido com `mp.add_forced_key_binding` encaminhando teclas por FIFO.
+  `loadfile` troca o padrão; `show-text` mostra código/nits e instruções.
+- **Restauração:** guard da regra temporária + watchdog pós-crash por
+  `socketpair`/double-fork. O watchdog mata o mpv órfão e roda
+  `hyprctl reload` se o processo principal desaparecer sem `done`. SIGINT/
+  SIGTERM são tratados por flag `sig_atomic_t` e re-levantados após a
+  restauração. Testes cobrem crash, graceful stop e timeout de FIFO.
+- **CLI:** `hdrcal wizard --output <nome> [--profile-path <arquivo>]
+  [--config-dir <diretório>]`.
+- **Corrigido:** `SessionDirectory` era copiável apesar do destrutor; a cópia
+  temporária removia o diretório da sessão antes do `mkfifo`. Passou a ser
+  move-only.
+- **Corrigido:** `mp.add_key_binding` não recebia as teclas sintéticas de
+  `hl.dsp.send_shortcut`; os bindings passaram a ser
+  `mp.add_forced_key_binding`.
+
+**Smoke test ao vivo:** três fases concluídas com teclas sintéticas, perfil
+gravado em caminho temporário e reload ok; `Esc` abortou sem gravar; SIGTERM
+restaurou a sessão sem mpv órfão; watchdog passou nos testes de crash e
+graceful. `ctest`: 117 testes verdes.
+
+**Pendente do M2:** a sessão visual real do usuário (aceite) e a integração
+explícita em `monitors.lua`. O projeto não altera essa configuração sem pedido.
+
+### Correções pós-auditoria independente (2026-10-19)
+
+#### P1 — regra temporária segura fora do setup auditado
+
+- **Corrigido:** o guard da regra temporária não confiava mais no merge
+  implícito do `hl.monitor`. Antes de aplicar, verifica via `hyprctl monitors -j`
+  e varredura do diretório de configuração que existe uma regra com `output`
+  exatamente igual à saída (Lua `hl.monitor`, inclusive multi-linha, ou
+  `monitor=` legado). Ausente a regra, falha com erro pt-BR que explica o
+  requisito de merge do Hyprland 0.56.2 e como ajustar `monitors.lua`; o hdrcal
+  não edita a config do usuário.
+- **Adicionado:** pós-verificação obrigatória após o `eval`. O guard compara
+  `eotf`, `max bpc` e `currentFormat` antes/depois; se houve degradação (ou se
+  a releitura falhou), executa `hyprctl reload`, devolve erro e não mantém a
+  regra aplicada. Falha do próprio `reload` mantém `m_applied` para o destrutor
+  tentar novamente.
+- **Testes:** `FakeHyprCommands` cobre regra existente, regra ausente
+  (`desc:`), degradação detectada na pós-verificação com restauração disparada,
+  falha de releitura pós-aplicação e retry de restauração.
+- **Documentado:** semântica de merge do `hl.monitor` no `DESIGN_NOTES` com
+  citação do fonte (`LuaBindingsConfigRules.cpp`, `hlMonitor`, v0.56.2) e
+  pré-requisito da regra por nome no README.
+
+#### P2 — portabilidade, versões e multi-GPU
+
+- **Documentado:** nova seção "Portabilidade" no README com pacotes de build
+  por família (Ubuntu/Debian e Arch/Noctalia), requisitos de runtime, piso de
+  versões e a declaração explícita de que NVIDIA não foi testada.
+- **Adicionado:** `preflight` lê `hyprctl version`, exige Hyprland ≥ 0.55 e
+  avisa (sem reprovar) quando a versão é maior que a auditada 0.56.2. A
+  verificação virou o sexto item reportado.
+- **Adicionado:** CMake exige `libdrm >= 2.4.99`, GCC ≥ 11 ou Clang ≥ 14, com
+  erro de configure em pt-BR.
+- **Corrigido:** seleção de card KMS extraída para
+  `selectKmsCardForConnector`. Dois cards com o mesmo nome de conector agora
+  produzem erro de ambiguidade com todos os paths, em vez de escolher o
+  primeiro silenciosamente. Testes unitários injetam a lista de cards.
+- **Adicionado:** variável `HDRICAL_PROFILE_PATH` como override do caminho do
+  perfil, com prioridade `--path`/`--profile-path` > env > XDG. Documentado no
+  `--help`, README e `DESIGN_NOTES`, com teste da resolução.
+
+#### P3 — conformidade de nomes e histórico
+
+- `requireValue` renomeado para `findMissingValueError` (a função devolve a
+  mensagem de erro, não um valor). Comportamento inalterado.
+- Constantes ST 2084 renomeadas e documentadas por papel:
+  `kPqM1LuminanceExponent`, `kPqM2SignalExponent`,
+  `kPqC1RationalOffset`, `kPqC2RationalNumeratorScale`,
+  `kPqC3RationalDenominatorScale`.
+- A normalização de zero negativo em `formatLocaleIndependentDouble` ganhou
+  comentário do porquê e teste que prova a saída canônica `0` (em vez de `-0`).
+- A seção "Última verificação" passou a declarar o estado da sessão em que cada
+  captura foi feita.
+
 ### Decidido
 
 - `hyprctl keyword` não funciona com a configuração Lua do Hyprland 0.56.2;
@@ -66,6 +153,17 @@ existe. Datas em UTC.
 - Parser JSON próprio em vez de dependência externa para um único endpoint.
 - O formato `hdrcal.lua` contém um perfil por arquivo no M1; multi-monitor fica
   para M2/M4.
+- M2: o gerador de padrões é interno (C++/zlib + `cICP`), não uma invocação de
+  FFmpeg por passo. Evidência: o FFmpeg 9.0.1 não grava `cICP` em PNG, leva
+  100–300 ms por padrão e a cadeia de escala introduziu 1–3 LSB de erro; o
+  gerador interno é exato e rápido.
+- M2: teclas são encaminhadas por um script Lua embutido + FIFO, com
+  `mp.add_forced_key_binding`. O binding normal não recebeu as teclas
+  sintéticas de `hl.dsp.send_shortcut`; o forçado recebeu.
+- M2: o watchdog é um processo destacado por `socketpair` + double-fork. Sem
+  `done`, ele mata o mpv órfão e roda `hyprctl reload`.
+- M2: as fases usam códigos iniciais 100/700/592, passo 1 e passo grosso 10; a
+  máxima usa xadrez `código`/`código-16` para expor clipping.
 
 ### Corrigido
 
@@ -78,32 +176,77 @@ existe. Datas em UTC.
 - FFmpeg 9.0.1 não grava metadados de cor em PNG; o script passou a escrever o
   chunk `cICP` diretamente.
 
-### Última verificação
+### Última verificação (pós-correções P1–P3)
+
+**Legenda do estado da sessão em cada captura:**
+
+- Build e `ctest`: não tocam na sessão viva.
+- `probe` e `preflight`: capturados com a sessão viva já em HDR
+  (`bitdepth=10`, `cm="hdr"`, KMS `eotf=2`, `max bpc=10`), **sem** regra
+  temporária aplicada. O valor `render:cm_auto_hdr=1` no `preflight` é o padrão
+  do usuário e não é um estado permanente criado pelo hdrcal; a captura
+  histórica com `cm_auto_hdr=0` exigia alteração temporária de runtime.
+- `profile write`: executado com `--no-reload` e com
+  `HDRICAL_PROFILE_PATH` apontando para `/tmp`; não alterou a sessão nem a
+  config do usuário.
+
+Ambiente: GCC 16.2.0, Clang 23.1.0, libdrm 2.4.134, Hyprland 0.56.2.
 
 ```text
 $ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+-- Checking for module 'libdrm>=2.4.99'
+--   Found libdrm, version 2.4.134
+-- Configuring done
+-- Generating done
+
 $ cmake --build build -j
+[100%] Built target hdrcal
+
 $ ctest --test-dir build --output-on-failure
 Test project /home/manoel/hdrcal/build
     Start 1: hdrcal_unit_tests
-1/1 Test #1: hdrcal_unit_tests ................   Passed    0.00 sec
+1/1 Test #1: hdrcal_unit_tests ................   Passed    0.76 sec
 
 100% tests passed out of 1
 
 $ ./build/hdrcal_tests
-61 passaram, 0 falharam
+117 passaram, 0 falharam
 ```
 
-Também compilado sem warnings com `clang++` em `build-clang` (mesmos 61 testes
-verdes).
+Build com Clang, também com `-Werror` e sem warnings:
 
 ```text
-$ ./build/hdrcal profile write --output DP-2 --min 0.02 --max 600 --avg 350 \
-    --path /tmp/opencode/hdrcal-acceptance/hdrcal.lua --no-reload
-exit=0
+$ cmake -S . -B build-clang -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=clang++
+$ cmake --build build-clang -j
+[100%] Built target hdrcal
+
+$ ctest --test-dir build-clang --output-on-failure
+Test project /home/manoel/hdrcal/build-clang
+    Start 1: hdrcal_unit_tests
+1/1 Test #1: hdrcal_unit_tests ................   Passed    0.76 sec
+
+100% tests passed out of 1
+```
+
+```text
+$ clang-format --dry-run --Werror $(find include src tests -name '*.cpp' -o -name '*.hpp')
+exit=0  # zero violações
+```
+
+```text
+$ HDRICAL_PROFILE_PATH=/tmp/opencode/hdrcal-acceptance/env-profile.lua \
+    ./build/hdrcal profile write --output DP-2 --min 0.02 --max 600 --avg 350 --no-reload
+Perfil gravado em /tmp/opencode/hdrcal-acceptance/env-profile.lua
+  saída: DP-2
+  min: 0.02 nits
+  max: 600 nits
+  max full-frame: 350 nits
+write_exit=0
 # arquivo contém min_luminance = 0.02, max_luminance = 600,
 # max_avg_luminance = 350 e calibrated_at em ISO 8601 UTC.
+```
 
+```text
 $ ./build/hdrcal probe --output DP-2
 KMS DP-2:
   max bpc: 10
@@ -113,21 +256,55 @@ KMS DP-2:
 Hyprland DP-2:
   currentFormat: XRGB2101010
   colorManagementPreset: hdr
+probe_exit=0
 ```
 
 ```text
-$ ./build/hdrcal preflight --output DP-2   # com cm_auto_hdr temporariamente 0
+$ ./build/hdrcal preflight --output DP-2   # sessão em HDR, cm_auto_hdr=1 (padrão)
 [PASS] HDR ativo no KMS (eotf = 2) — eotf=2 (PQ) no conector DP-2
 [PASS] Saída em 10 bits (max bpc e framebuffer) — max bpc=10, framebuffer=XRGB2101010
-[PASS] Troca automática de HDR desligada — render:cm_auto_hdr=0, esperado 0
+[FAIL] Troca automática de HDR desligada — render:cm_auto_hdr=1, esperado 0
 [PASS] Nenhum ICC ativo no monitor — nenhum 'icc' de monitor encontrado em /home/manoel/.config/hypr
 [PASS] Direct scanout desligado — render:direct_scanout=0, esperado 0
-preflight_exit=0
+[PASS] Versão do Hyprland compatível (>= 0.55) — Hyprland 0.56.2 (auditada: 0.56.2)
+preflight_exit=1
 ```
+
+O `[FAIL]` acima é o comportamento correto e esperado: a captura foi feita sem
+desligar temporariamente `render:cm_auto_hdr`. O hdrcal não alterou essa opção.
+
+#### M2 — smoke test do wizard (teclas sintéticas)
+
+O wizard foi executado ao vivo com `render:cm_auto_hdr=0` temporário, mpv em
+fullscreen na `DP-2` e teclas enviadas por `hl.dsp.send_shortcut` (encaminhadas
+pelo script Lua). Resultado:
+
+```text
+Pré-condições OK. Abrindo mpv em fullscreen (2560x1440)...
+Fase 1/3 ...
+Fase 2/3 ...
+Fase 3/3 ...
+Calibração concluída. Perfil salvo em /tmp/opencode/hdrcal-m2-final/hdrcal.lua
+  min_luminance = 0.35650839475326696
+  max_luminance = 537
+  max_avg_luminance = 181
+Para jogos: min_luminance=0.3565... max_luminance=537 max_avg_luminance=181
+```
+
+O perfil foi gravado, o reload rodou e `cm_auto_hdr` voltou a `1`; nenhum mpv
+ficou órfão. Os valores **não** são uma calibração real: as teclas sintéticas
+produziram eventos duplicados/perdidos em alguns passos. O teste prova a
+mecânica, não o resultado visual.
+
+Abort com `Esc`: o wizard saiu com código 1, não criou perfil, removeu o mpv e
+o diretório temporário, e restaurou `cm_auto_hdr=1`. SIGTERM no meio da sessão:
+mesma restauração, sem mpv órfão. Watchdog: testes de crash (mata o mpv e roda
+o comando de restauração) e de encerramento gracioso passaram.
 
 ### Pendente
 
-- M2: wizard com mpv, padrões 16-bit e restauração em SIGINT/SIGTERM/watchdog.
+- M2: sessão visual real do usuário (aceite) e integração explícita em
+  `monitors.lua` para aplicar o perfil no reload/reboot.
 - M2: verificar com padrão acima de 603 nits que a regra temporária
   `max_luminance=10000` impede o tone mapping do compositor.
 - M3, M4 e M5 conforme `docs/DEVELOPMENT_PLAN.md`.

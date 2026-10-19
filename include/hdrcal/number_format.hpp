@@ -12,6 +12,10 @@ namespace hdrcal {
 // representation. Used for Lua and Hyprland input, both of which must not
 // depend on the process locale.
 [[nodiscard]] inline std::string formatLocaleIndependentDouble(double value) {
+    // Canonicalize negative zero: the shortest round-trip form would be "-0",
+    // Lua preserves the sign of zero, and a generated profile should not change
+    // bytes merely because a measured value arrived as -0.0. Tested by
+    // testFormatLocaleIndependentDouble_NegativeZero_EmitsCanonicalZero.
     if (value == 0.0)
         value = 0.0;
 

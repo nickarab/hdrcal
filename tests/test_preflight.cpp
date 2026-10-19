@@ -19,10 +19,14 @@ struct FakeEnvironment {
     int hdrEotf = 2;
     bool hdrEotfPresent = true;
     std::string framebufferFormat = "XRGB2101010";
+    std::string hyprlandVersionLine = "Hyprland 0.56.2 built from branch at commit abc";
 };
 
 hdrcal::CommandExecutor makeExecutor(FakeEnvironment environment) {
     return [environment](const std::vector<std::string>& arguments) -> hdrcal::CommandResult {
+        if (arguments.size() >= 2 && arguments.at(1) == "version")
+            return hdrcal::CommandResult{.exitCode = 0, .standardOutput = environment.hyprlandVersionLine + "\n", .standardError = {}};
+
         if (arguments.size() >= 3 && arguments.at(1) == "getoption") {
             if (arguments.at(2) == "render:cm_auto_hdr")
                 return hdrcal::CommandResult{.exitCode = 0,
@@ -73,7 +77,7 @@ HDRCAL_TEST(testCheckHdrPreconditions_AllRequirementsMet_PassesAllFiveChecks) {
     const hdrcal::PreflightResult result =
         hdrcal::checkHdrPreconditions(hdrcal::HyprController(makeExecutor(environment)), "DP-2", makeKmsReader(environment), configDirectory.path());
 
-    HDRCAL_REQUIRE_EQ(result.checks.size(), std::size_t{5});
+    HDRCAL_REQUIRE_EQ(result.checks.size(), std::size_t{6});
     HDRCAL_REQUIRE(result.allPassed());
 }
 
@@ -85,7 +89,7 @@ HDRCAL_TEST(testCheckHdrPreconditions_EotfNotPq_FailsFirstCheck) {
     const hdrcal::PreflightResult result =
         hdrcal::checkHdrPreconditions(hdrcal::HyprController(makeExecutor(environment)), "DP-2", makeKmsReader(environment), configDirectory.path());
 
-    HDRCAL_REQUIRE_EQ(result.checks.size(), std::size_t{5});
+    HDRCAL_REQUIRE_EQ(result.checks.size(), std::size_t{6});
     HDRCAL_REQUIRE(!result.checks.at(0).passed);
     HDRCAL_REQUIRE(!result.allPassed());
 }
@@ -227,4 +231,42 @@ HDRCAL_TEST(testCheckHdrPreconditions_DisabledMonitor_FailsSecondCheck) {
     HDRCAL_REQUIRE(result.checks.at(0).passed);
     HDRCAL_REQUIRE(!result.checks.at(1).passed);
     HDRCAL_REQUIRE(result.checks.at(1).detail.find("desativado") != std::string::npos);
+}
+
+HDRCAL_TEST(testCheckHdrPreconditions_HyprlandBelowFloor_FailsVersionCheck) {
+    const hdrcal::test::TemporaryDirectory configDirectory("hdrcal-preflight-old-hyprland");
+    FakeEnvironment environment;
+    environment.hyprlandVersionLine = "Hyprland 0.54.9 built from branch at commit abc";
+
+    const hdrcal::PreflightResult result =
+        hdrcal::checkHdrPreconditions(hdrcal::HyprController(makeExecutor(environment)), "DP-2", makeKmsReader(environment), configDirectory.path());
+
+    HDRCAL_REQUIRE_EQ(result.checks.size(), std::size_t{6});
+    HDRCAL_REQUIRE(result.checks.at(5).detail.find("anterior ao mínimo 0.55") != std::string::npos);
+    HDRCAL_REQUIRE(!result.allPassed());
+}
+
+HDRCAL_TEST(testCheckHdrPreconditions_HyprlandNewerThanAudited_PassesWithWarning) {
+    const hdrcal::test::TemporaryDirectory configDirectory("hdrcal-preflight-new-hyprland");
+    FakeEnvironment environment;
+    environment.hyprlandVersionLine = "Hyprland 0.57.0 built from branch at commit abc";
+
+    const hdrcal::PreflightResult result =
+        hdrcal::checkHdrPreconditions(hdrcal::HyprController(makeExecutor(environment)), "DP-2", makeKmsReader(environment), configDirectory.path());
+
+    HDRCAL_REQUIRE(result.checks.at(5).passed);
+    HDRCAL_REQUIRE(result.checks.at(5).detail.find("mais nova que a auditada 0.56.2") != std::string::npos);
+    HDRCAL_REQUIRE(result.allPassed());
+}
+
+HDRCAL_TEST(testCheckHdrPreconditions_UnparseableHyprlandVersion_FailsVersionCheck) {
+    const hdrcal::test::TemporaryDirectory configDirectory("hdrcal-preflight-bad-version");
+    FakeEnvironment environment;
+    environment.hyprlandVersionLine = "Hyprland unknown build";
+
+    const hdrcal::PreflightResult result =
+        hdrcal::checkHdrPreconditions(hdrcal::HyprController(makeExecutor(environment)), "DP-2", makeKmsReader(environment), configDirectory.path());
+
+    HDRCAL_REQUIRE_EQ(result.checks.size(), std::size_t{6});
+    HDRCAL_REQUIRE(!result.checks.at(5).passed);
 }
