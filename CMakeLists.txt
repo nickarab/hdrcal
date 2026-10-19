@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 
 project(hdrcal VERSION 0.1.0 LANGUAGES CXX)
 
+include(GNUInstallDirs)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -46,6 +48,10 @@ target_link_libraries(hdrcal_core PUBLIC PkgConfig::LIBDRM ZLIB::ZLIB)
 add_executable(hdrcal src/main.cpp)
 target_link_libraries(hdrcal PRIVATE hdrcal_core)
 
+install(TARGETS hdrcal
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
 enable_testing()
 
 add_executable(hdrcal_tests
@@ -70,3 +76,11 @@ add_executable(hdrcal_tests
 target_link_libraries(hdrcal_tests PRIVATE hdrcal_core)
 
 add_test(NAME hdrcal_unit_tests COMMAND hdrcal_tests)
+
+add_test(NAME hdrcal_install_smoke
+    COMMAND ${CMAKE_COMMAND}
+        -DHDRCAL_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -DHDRCAL_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/install-smoke
+        -DHDRCAL_INSTALL_BINDIR=${CMAKE_INSTALL_BINDIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/install_smoke.cmake
+)

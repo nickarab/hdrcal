@@ -53,9 +53,22 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-O binário fica em `build/hdrcal`. A build usa
-`-Wall -Wextra -Wpedantic -Werror`; todo o código é formatado com
-`clang-format` e o `.clang-format` do repositório.
+O binário de build fica em `build/hdrcal`. Para instalar no usuário:
+
+```sh
+cmake --install build --prefix "$HOME/.local"
+```
+
+Isso cria/atualiza `~/.local/bin/hdrcal`; confirme que `~/.local/bin` está no
+`PATH`. Para instalar no sistema (padrão `/usr/local/bin`):
+
+```sh
+sudo cmake --install build
+```
+
+A instalação é feita pela regra `install(TARGETS hdrcal ...)` do CMake, sem
+symlink manual. A build usa `-Wall -Wextra -Wpedantic -Werror`; todo o código
+é formatado com `clang-format` e o `.clang-format` do repositório.
 
 Resultado real da última execução: ver a seção "Última verificação" no
 [`CHANGELOG.md`](CHANGELOG.md).

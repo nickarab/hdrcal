@@ -534,6 +534,55 @@ erro). As teclas sintéticas sofreram eventos perdidos/atrasados; os valores
 acima são mecânica, não calibração. Após o wizard: `render:cm_auto_hdr=1`, sem
 mpv órfão, diretório de sessão removido e `probe` ainda em 10 bits/HDR.
 
+### Instalação via CMake (2026-10-19)
+
+- Adicionada a regra `install(TARGETS hdrcal RUNTIME DESTINATION
+  ${CMAKE_INSTALL_BINDIR})` com `GNUInstallDirs`; o binário é instalado por
+  `cmake --install`, sem symlink manual.
+- Novo teste `hdrcal_install_smoke` (`tests/install_smoke.cmake`) instala em um
+  prefixo temporário, confere o binário e executa `--help`.
+- README documenta instalação de usuário (`--prefix "$HOME/.local"`) e de
+  sistema (`sudo cmake --install build`).
+
+Verificação real:
+
+```text
+$ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+$ cmake --build build -j
+$ ctest --test-dir build --output-on-failure
+1/2 Test #1: hdrcal_unit_tests ................   Passed    0.76 sec
+2/2 Test #2: hdrcal_install_smoke .............   Passed    0.01 sec
+100% tests passed out of 2
+
+$ ./build/hdrcal_tests | tail -1
+136 passaram, 0 falharam
+
+$ cmake -S . -B build-clang -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_CXX_COMPILER=clang++
+$ cmake --build build-clang -j
+$ ctest --test-dir build-clang --output-on-failure
+1/2 Test #1: hdrcal_unit_tests ................   Passed    0.76 sec
+2/2 Test #2: hdrcal_install_smoke .............   Passed    0.01 sec
+100% tests passed out of 2
+
+$ ./build-clang/hdrcal_tests | tail -1
+136 passaram, 0 falharam
+
+$ clang-format --dry-run --Werror $(find include src tests -name '*.cpp' -o -name '*.hpp')
+exit=0
+
+$ cmake --install build --prefix "$HOME/.local"
+-- Install configuration: "Release"
+-- Installing: /home/manoel/.local/bin/hdrcal
+
+$ ls -l "$HOME/.local/bin/hdrcal"
+-rwxr-xr-x 1 manoel manoel 640200 ... /home/manoel/.local/bin/hdrcal
+
+$ fish -c 'command -v hdrcal; hdrcal --help | head -3'
+/home/manoel/.local/bin/hdrcal
+hdrcal — calibração visual de HDR para Hyprland
+```
+
 ### Pendente
 
 - M2: verificar com padrão acima de 603 nits que a regra temporária
