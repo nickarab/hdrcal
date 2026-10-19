@@ -24,7 +24,7 @@ plugin de compositor e suporte a outros compositores.
 |---|---|---|
 | M0 — spike do pipeline HDR | **concluído em 2026-10-19** | mpv/libplacebo entregou superfície PQ 10-bit; KMS confirmou `eotf=2` e `max bpc=10`; comparação visual 653/1023 × 712/1023 confirmada pelo usuário. |
 | M1 — núcleo | **concluído em 2026-10-19** | `pq`, `profile`, `hypr`, `kms`, `preflight`, parser JSON, CLI e testes unitários. |
-| M2 — wizard com backend mpv | **implementado e smoke-testado em 2026-10-19; aceite visual do usuário pendente** | padrões 16-bit/PQ, IPC do mpv, três fases, regra temporária com guard + watchdog, perfil e reload. Falta a sessão visual real do usuário e a integração explícita em `monitors.lua`. |
+| M2 — wizard com backend mpv | **aceito pelo usuário em 2026-10-19** | padrões 16-bit/PQ, IPC do mpv, três fases, regra temporária com guard + watchdog, perfil e reload. A integração no `monitors.lua` e o consumo do perfil estão documentados abaixo. |
 | M3 — app nativo Vulkan/Wayland | pendente | swapchain 10-bit, `VK_COLOR_SPACE_HDR10_ST2084_EXT`, `wp-color-management-v1`. |
 | M4 — qualidade | pendente | snapshot/comparação DDC, export JSON, toggle baseado em perfil. |
 | M5 — release interno | pendente | README final e teste A/B de reprodutibilidade. |
@@ -229,9 +229,9 @@ do Hyprland é limpo antes da releitura.
 - A aplicação automática do perfil exige que a configuração do monitor consuma
   `require("hdrcal")` (snippet acima). O wizard grava o arquivo e executa
   `hyprctl reload`, mas **não edita** `monitors.lua` sem pedido explícito.
-- A calibração visual real ainda não foi executada nesta entrega; o wizard foi
-  validado com teclas sintéticas (três fases, perfil, `Esc`, SIGTERM e
-  watchdog). O aceite final é uma sessão visual do usuário.
+- O M2 foi aceito pelo usuário em 2026-10-19. O wizard foi validado com teclas
+  sintéticas (três fases, perfil, `Esc`, SIGTERM e watchdog); o aceite formal
+  não transforma os valores do smoke test em uma calibração real.
 - Os padrões são gerados pelo próprio hdrcal (PNG 16-bit + `cICP` via zlib), não
   por uma invocação de ffmpeg por passo. O ffmpeg 9.0.1 não grava `cICP` em PNG
   e leva 100–300 ms por padrão; a decisão e as medições estão no

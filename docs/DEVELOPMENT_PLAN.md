@@ -81,11 +81,11 @@ em `docs/DESIGN_NOTES.md`.
 - o perfil sobrevive a reboot/reload;
 - restauração confirmada em todos os caminhos de saída.
 
-**Estado:** implementado e smoke-testado em 2026-10-19. A mecânica foi
-validada ao vivo (três fases via teclas do mpv, perfil gravado, reload, `Esc`,
-SIGTERM e watchdog matando mpv órfão). O aceite final depende de uma sessão
-visual real do usuário e da integração explícita em `monitors.lua` (o projeto
-não altera essa configuração sem pedido).
+**Estado:** implementado, smoke-testado e **aceito pelo usuário em
+2026-10-19**. A mecânica foi validada ao vivo (três fases via teclas do mpv,
+perfil gravado, reload, `Esc`, SIGTERM e watchdog matando mpv órfão). A
+integração em `monitors.lua` foi feita com autorização explícita do usuário
+(W4); o projeto continua sem alterar config de usuário por conta própria.
 
 ## M3 — App nativo Vulkan/Wayland
 

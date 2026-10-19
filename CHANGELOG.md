@@ -49,7 +49,7 @@ existe. Datas em UTC.
   comandos nos testes.
 - CLI: `profile write`, `preflight`, `probe`.
 
-### M2 — wizard com backend mpv: implementado e smoke-testado
+### M2 — wizard com backend mpv: implementado, smoke-testado e aceito
 
 - **Padrões:** gerador C++/zlib de PNG RGB 16-bit com `cICP` BT.2020/PQ,
   resolução lida do monitor. Fase mínima com mancha central, máxima com xadrez
@@ -79,10 +79,14 @@ gravado em caminho temporário e reload ok; `Esc` abortou sem gravar; SIGTERM
 restaurou a sessão sem mpv órfão; watchdog passou nos testes de crash e
 graceful. `ctest`: 117 testes verdes.
 
-**Pendente do M2:** a sessão visual real do usuário (aceite) e a integração
-explícita em `monitors.lua`. O projeto não altera essa configuração sem pedido.
-A documentação do wizard passou a incluir o pré-requisito manual
-`render:cm_auto_hdr=0`; o `hyprctl reload` final devolve o valor ao padrão.
+**Aceite do M2:** o usuário aceitou o wizard em 2026-10-19 e autorizou
+expressamente a integração no `monitors.lua`. Os valores do smoke test não são
+uma calibração real; o aceite formal não os promove a perfil de produção.
+
+**Pendente do M2:** a integração explícita em `monitors.lua` (W4). O projeto não
+altera essa configuração sem pedido. A documentação do wizard passou a incluir o
+pré-requisito manual `render:cm_auto_hdr=0`; o `hyprctl reload` final devolve o
+valor ao padrão.
 
 ### Correções pós-auditoria independente (2026-10-19)
 
@@ -305,8 +309,8 @@ o comando de restauração) e de encerramento gracioso passaram.
 
 ### Pendente
 
-- M2: sessão visual real do usuário (aceite) e integração explícita em
-  `monitors.lua` para aplicar o perfil no reload/reboot.
+- M2: integração explícita em `monitors.lua` para aplicar o perfil no
+  reload/reboot (W4).
 - M2: verificar com padrão acima de 603 nits que a regra temporária
   `max_luminance=10000` impede o tone mapping do compositor.
 - M3, M4 e M5 conforme `docs/DEVELOPMENT_PLAN.md`.

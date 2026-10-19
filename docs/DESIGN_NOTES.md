@@ -80,8 +80,8 @@ diretório da sessão e carregado com `--script`. Ele abre o FIFO
 mapeia para `WizardKey`. Usamos `mp.add_forced_key_binding`, não
 `mp.add_key_binding`: em teste controlado, `hl.dsp.send_shortcut` entregou a
 tecla ao mpv (`[input] No key binding found for key 'RIGHT'`) mas não acionou o
-binding normal do script; o binding forçado acionou. O teste com teclado real
-do usuário continua sendo o aceite.
+binding normal do script; o binding forçado acionou. O usuário aceitou o M2 em
+2026-10-19.
 
 **Restauração:** o guard RAII restaura em saída normal, exceção e `Esc`. O
 wizard instala handlers de SIGINT/SIGTERM que apenas setam um
@@ -114,8 +114,8 @@ essa correção.
 
 Os valores do smoke test (min 0.3565 nits, max 537, avg 181) **não** são uma
 calibração real: as teclas sintéticas geraram eventos duplicados/perdidos em
-alguns passos. Eles só provam a mecânica. O aceite visual real é uma sessão do
-usuário com teclado físico.
+alguns passos. Eles só provam a mecânica. O usuário aceitou o M2 em 2026-10-19;
+os valores do smoke test não foram promovidos a perfil de produção.
 
 ## Descobertas de ambiente
 
