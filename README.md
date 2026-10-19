@@ -11,8 +11,9 @@ Entra no escopo:
 
 - os três testes visuais de calibração;
 - persistência do perfil em `~/.config/hypr/hdrcal.lua`;
-- integração com Hyprland (`hyprctl`), incluindo pré-condições de HDR e regra
-  temporária de tone mapping;
+- integração com Hyprland (`hyprctl`), incluindo pré-condições de HDR, regra
+  temporária de tone mapping e o comando explícito `hdrcal integrate` para
+  ligar o perfil ao `monitors.lua`;
 - conversões ST 2084 (PQ) usadas pelos padrões e pela CLI.
 
 Não entra no escopo: calibração de cor, gamut, white point, ICC, LUT 3D,
@@ -73,8 +74,8 @@ Pacotes de **build** por família:
 - Arch/Noctalia:
   `sudo pacman -S --needed base-devel cmake pkgconf libdrm mpv`.
 
-O `mpv` só é necessário para o wizard visual (M2); os comandos `probe` e
-`preflight` funcionam sem ele.
+O `mpv` só é necessário para o wizard visual (M2); os comandos `probe`,
+`preflight` e `integrate` funcionam sem ele.
 
 Requisitos de **runtime**:
 
@@ -138,6 +139,7 @@ Ligar o perfil à configuração do monitor (uma vez; dry-run por padrão):
 ```sh
 hdrcal integrate --output DP-2
 hdrcal integrate --output DP-2 --apply
+hdrcal integrate --help
 ```
 
 Gravar um perfil manualmente (M1):
@@ -179,7 +181,8 @@ curingas não são suficientes: o merge parcial do `hl.monitor` no Hyprland
 0.56.2 só copia a regra existente quando o nome coincide. Se a regra não
 existir, o `wizard` e o guard da regra temporária falham **antes** de alterar a
 sessão, com instruções para ajustar a config; o hdrcal nunca edita
-`monitors.lua` por conta própria.
+`monitors.lua` por conta própria, exceto pelo comando explícito
+`hdrcal integrate --apply`.
 
 Diagnóstico somente-leitura do KMS e do monitor:
 
@@ -215,14 +218,17 @@ hdrcal integrate --output DP-2 --apply  # escreve, valida e mantém backup
 
 O `integrate` localiza a regra pelo nome exato da saída (Lua multi-linha ou
 `monitor=` legado), recusa configurações ambíguas e, sem `--apply`, apenas
-imprime o diff. Com `--apply` ele cria um backup
+imprime o diff. Regras no formato legado são detectadas, mas `--apply` as
+recusa: `require("hdrcal")` só existe na config Lua, então o comando pede
+conversão ou integração manual. Com `--apply` ele cria um backup
 `monitors.lua.bak.hdrcal.<timestamp>` ao lado do arquivo, faz a edição mínima,
 executa `hyprctl reload`, relê a regra e desfaz automaticamente se a validação
 falhar. Rodar de novo é seguro: se os três campos já existem, nada é escrito.
 A integração não exige perfil existente; ela apenas passa a consumir
 `require("hdrcal").profiles["DP-2"]` quando o arquivo aparecer. O projeto
 **não altera** a config na instalação, no build nem no wizard — só neste
-comando explícito.
+comando explícito. `hdrcal integrate --help` mostra as opções e o
+comportamento do dry-run.
 
 O resultado em `monitors.lua` é equivalente a este trecho (o comando insere o
 bloco de perfil e os três campos, preservando todos os demais):
@@ -290,14 +296,22 @@ do Hyprland é limpo antes da releitura.
 ## Estrutura do repositório
 
 ```text
-include/hdrcal/   cabeçalhos públicos (pq, profile, hypr, hypr_config, kms,
-                  preflight, json, wizard, wizard_session, mpv, pattern,
+include/hdrcal/   cabeçalhos públicos (pq, profile, hypr, hypr_config, integrate,
+                  kms, preflight, json, wizard, wizard_session, mpv, pattern,
                   process, watchdog)
-src/              implementação do núcleo, do wizard e da CLI
+src/              implementação do núcleo, do wizard, do integrate e da CLI
 tests/            testes unitários sem GPU/compositor ou interação humana
 docs/             padrões de código, plano e decisões técnicas
 scripts/          gerador de padrão PQ do spike M0 (sem dependências externas)
 ```
+
+## Licença
+
+MIT. Veja [`LICENSE`](LICENSE).
+
+As dependências externas mantêm suas próprias licenças: `libdrm` (MIT), `zlib`
+(licença zlib) e `mpv` (a licença do build da distribuição; o hdrcal o executa
+como processo externo e não redistribui o binário).
 
 ## Documentos obrigatórios
 
