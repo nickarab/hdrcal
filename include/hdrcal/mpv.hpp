@@ -21,6 +21,13 @@ namespace hdrcal {
 // {"command":["loadfile","/tmp/a.png","replace"],"request_id":1}
 [[nodiscard]] std::string buildMpvCommandJson(const std::vector<std::string>& command, long long requestId);
 
+// Builds the named-argument form required by osd-overlay:
+// {"command":{"name":"osd-overlay","id":1,...},"request_id":1}.
+// mpv only enables named arguments when "command" is an object; a flat array
+// rejects the integer id. Newlines in the instruction become ASS "\N" so the
+// entire instruction stays one bottom-centered event.
+[[nodiscard]] std::string buildMpvInstructionOverlayJson(std::string_view instruction, long long requestId);
+
 enum class MpvResponseKind {
     MatchingResponse,
     Unrelated,
@@ -59,6 +66,11 @@ public:
 
     [[nodiscard]] std::optional<std::string> loadFile(const std::filesystem::path& patternPath);
     [[nodiscard]] std::optional<std::string> showText(std::string_view text, int durationMilliseconds);
+
+    // Adds or replaces the persistent bottom-centered instruction overlay.
+    // Unlike show-text, this overlay has no timeout and remains visible until
+    // the next call or until the IPC connection closes.
+    [[nodiscard]] std::optional<std::string> showPermanentInstruction(std::string_view instruction);
 
     // quit may close the socket without a response, so this only checks that
     // the command bytes were sent.

@@ -142,6 +142,20 @@ valor ao padrão.
 - A seção "Última verificação" passou a declarar o estado da sessão em que cada
   captura foi feita.
 
+### Correções de UX do wizard (pós-aceite do M2)
+
+#### W2 — instrução da fase não some mais durante o ajuste
+
+- **Corrigido:** a instrução da fase era enviada no mesmo `show-text` do valor
+  atual, com duração de 4000 ms. O OSD embutido do mpv esconde o texto sozinho
+  depois da duração, então a instrução desaparecia no meio da fase. A instrução
+  passou a usar um overlay ASS permanente (`osd-overlay`, rodapé, sem timeout),
+  atualizado apenas quando a fase muda; o código/nits continuam em `show-text`
+  efêmero, em outra camada, sem apagar nem cobrir a instrução.
+- O `MpvIpcClient` ganhou `showPermanentInstruction` e o construtor testável
+  `buildMpvInstructionOverlayJson`, que usa argumentos nomeados (exigidos pelo
+  `osd-overlay`) e converte quebras de linha em `\N` do ASS.
+
 ### Decidido
 
 - `hyprctl keyword` não funciona com a configuração Lua do Hyprland 0.56.2;

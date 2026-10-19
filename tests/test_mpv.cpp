@@ -16,6 +16,12 @@ HDRCAL_TEST(testBuildMpvCommandJson_EscapesStringsAndBuildsRequestId) {
     HDRCAL_REQUIRE_EQ(json, std::string("{\"command\":[\"loadfile\",\"/tmp/a b\\\"c\\\\d.png\",\"replace\"],\"request_id\":7}"));
 }
 
+HDRCAL_TEST(testBuildMpvInstructionOverlayJson_UsesNamedArgumentsAndAssLineBreak) {
+    const std::string json = hdrcal::buildMpvInstructionOverlayJson("Fase 1/3\nSetas = 1 código", 9);
+    HDRCAL_REQUIRE_EQ(json, std::string("{\"command\":{\"name\":\"osd-overlay\",\"id\":1,\"format\":\"ass-events\",\"data\":\"{\\\\an2\\\\fs28}"
+                                        "Fase 1/3\\\\NSetas = 1 código\"},\"request_id\":9}"));
+}
+
 HDRCAL_TEST(testEscapeJsonString_EscapesControlCharacters) {
     HDRCAL_REQUIRE_EQ(hdrcal::escapeJsonString("a\nb\tc"), std::string("a\\nb\\tc"));
     HDRCAL_REQUIRE_EQ(hdrcal::escapeJsonString(std::string("\x01")), std::string("\\u0001"));

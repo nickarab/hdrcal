@@ -121,9 +121,10 @@ abre o mpv em fullscreen na saída indicada e conduz três fases:
    estável.
 
 Durante o wizard: `←`/`→` mudam 1 código, `Shift+←`/`Shift+→` mudam 10,
-`Enter` salva a fase e `Esc` aborta. O mpv mostra o código e a luminância
-calculada no OSD. Ao final, o perfil é gravado e o resultado é impresso no
-terminal, incluindo uma linha pronta para colar em jogos.
+`Enter` salva a fase e `Esc` aborta. A instrução da fase fica fixa no rodapé do
+mpv durante toda a fase; o código e a luminância calculada aparecem em um OSD
+separado e efêmero a cada ajuste. Ao final, o perfil é gravado e o resultado é
+impresso no terminal, incluindo uma linha pronta para colar em jogos.
 
 Opções: `--profile-path <arquivo>` (prioridade máxima), `--config-dir
 <diretório>` e `HDRICAL_PROFILE_PATH`. O padrão é

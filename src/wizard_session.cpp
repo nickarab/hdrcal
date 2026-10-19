@@ -185,14 +185,12 @@ std::string describeCurrentCode(const CalibrationWizard& wizard) {
     return "Código " + std::to_string(wizard.currentTenBitCode()) + "/1023 — " + formatLocaleIndependentDouble(luminanceNits) + " nits";
 }
 
-std::optional<std::string> showPhaseText(MpvIpcClient& ipc, const CalibrationWizard& wizard, bool includeInstruction) {
-    std::string text;
-    if (includeInstruction) {
-        text += phaseInstruction(wizard.currentPhase());
-        text += "\n";
-    }
-    text += describeCurrentCode(wizard);
-    return ipc.showText(text, includeInstruction ? 4000 : 1200);
+std::optional<std::string> showPhaseInstruction(MpvIpcClient& ipc, const CalibrationWizard& wizard) {
+    return ipc.showPermanentInstruction(phaseInstruction(wizard.currentPhase()));
+}
+
+std::optional<std::string> showCurrentCode(MpvIpcClient& ipc, const CalibrationWizard& wizard) {
+    return ipc.showText(describeCurrentCode(wizard), 1200);
 }
 
 constexpr std::string_view kMpvKeyForwardScript = R"lua(
@@ -385,7 +383,15 @@ WizardOutcome runCalibrationWizard(const WizardOptions& options) {
         return outcome;
     }
 
-    if (const auto osdError = showPhaseText(ipc, wizard, true); osdError.has_value()) {
+    if (const auto instructionError = showPhaseInstruction(ipc, wizard); instructionError.has_value()) {
+        (void)ipc.quit();
+        mpv.terminate();
+        (void)restoreSession();
+        outcome.error = instructionError;
+        return outcome;
+    }
+
+    if (const auto osdError = showCurrentCode(ipc, wizard); osdError.has_value()) {
         (void)ipc.quit();
         mpv.terminate();
         (void)restoreSession();
@@ -430,7 +436,13 @@ WizardOutcome runCalibrationWizard(const WizardOptions& options) {
                 outcome.error = loadError;
                 break;
             }
-            if (const auto osdError = showPhaseText(ipc, wizard, phaseChanged); osdError.has_value()) {
+            if (phaseChanged) {
+                if (const auto instructionError = showPhaseInstruction(ipc, wizard); instructionError.has_value()) {
+                    outcome.error = instructionError;
+                    break;
+                }
+            }
+            if (const auto osdError = showCurrentCode(ipc, wizard); osdError.has_value()) {
                 outcome.error = osdError;
                 break;
             }

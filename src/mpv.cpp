@@ -79,6 +79,23 @@ std::string buildMpvCommandJson(const std::vector<std::string>& command, long lo
     return json;
 }
 
+std::string buildMpvInstructionOverlayJson(std::string_view instruction, long long requestId) {
+    std::string data = "{\\an2\\fs28}";
+    for (const char character : instruction) {
+        if (character == '\n')
+            data += "\\N";
+        else
+            data.push_back(character);
+    }
+
+    std::string json = "{\"command\":{\"name\":\"osd-overlay\",\"id\":1,\"format\":\"ass-events\",\"data\":\"";
+    json += escapeJsonString(data);
+    json += "\"},\"request_id\":";
+    json += std::to_string(requestId);
+    json.push_back('}');
+    return json;
+}
+
 MpvResponse parseMpvResponseLine(std::string_view line, long long expectedRequestId) {
     const JsonParseResult parsed = parseJson(line);
     if (!parsed.value)
@@ -219,6 +236,14 @@ std::optional<std::string> MpvIpcClient::loadFile(const std::filesystem::path& p
 
 std::optional<std::string> MpvIpcClient::showText(std::string_view text, int durationMilliseconds) {
     return sendCommand({"show-text", std::string(text), std::to_string(durationMilliseconds)});
+}
+
+std::optional<std::string> MpvIpcClient::showPermanentInstruction(std::string_view instruction) {
+    const long long requestId = m_nextRequestId++;
+    if (const auto sendError = sendRaw(buildMpvInstructionOverlayJson(instruction, requestId) + "\n"); sendError.has_value())
+        return sendError;
+
+    return waitForResponse(requestId);
 }
 
 std::optional<std::string> MpvIpcClient::quit() {

@@ -70,7 +70,10 @@ Hyprland).
 `--tone-mapping=clip`, `--hdr-compute-peak=no`, `--no-input-default-bindings`,
 `--no-osc`, `--image-display-duration=inf`, `--scale=nearest` e
 `--input-ipc-server=<socket>`. O padrão é trocado por
-`{"command":["loadfile",...]}` e o OSD por `show-text`. O terminal recebe as
+`{"command":["loadfile",...]}`. A instrução da fase usa um overlay ASS
+permanente (`osd-overlay`, rodapé, sem timeout); o código e a luminância usam
+`show-text` efêmero. São camadas separadas: o `show-text` não apaga nem cobre a
+instrução, e o overlay só muda quando a fase muda. O terminal recebe as
 instruções e o resumo; o feedback visual fica no OSD do mpv.
 
 **Teclas:** um script Lua embutido (`kMpvKeyForwardScript`) é escrito no
