@@ -88,15 +88,16 @@ binding normal do script; o binding forçado acionou. O usuário aceitou o M2 em
 
 **Repetição e aceleração:** os bindings de seta são `repeatable`; o mpv usa
 autorepeat próprio (`--native-keyrepeat=no`, `--input-ar-delay=200`,
-`--input-ar-rate=15`) em vez do repeat do sistema. A taxa é 15/s, não os 40/s
-padrão: cada repetição regenera o PNG e recarrega pelo IPC, e 40/s encheria o
-FIFO e continuaria movendo depois de soltar a tecla. O `CalibrationWizard`
-recebe o instante de cada tecla (`handleKeyAt`), considera continuação apenas
-repetições com intervalo de até 300 ms e troca do passo 1 para o passo grosso
-10 após 1000 ms de pressão contínua. `Enter`/`Escape` não são `repeatable` e
-ainda têm debounce de 250 ms no estado puro: uma rajada de `Enter` avança no
-máximo uma fase. Os testes de unidade usam marcadores de tempo e cobrem passo
-1 → 10, pausa, troca de direção, reset de relógio e rajada de `Enter`.
+`--input-ar-rate=10`) em vez do repeat do sistema. A taxa é 10/s, não os 40/s
+padrão: cada repetição regenera o PNG e recarrega pelo IPC (medido em ~54 ms
+para 2560×1440), e 40/s encheria o FIFO e continuaria movendo depois de soltar
+a tecla. O `CalibrationWizard` recebe o instante de cada tecla
+(`handleKeyAt`), considera continuação apenas repetições com intervalo de até
+300 ms e troca do passo 1 para o passo grosso 10 após 1000 ms de pressão
+contínua. `Enter`/`Escape` não são `repeatable` e ainda têm debounce de 250 ms
+no estado puro: uma rajada de `Enter` avança no máximo uma fase. Os testes de
+unidade usam marcadores de tempo e cobrem passo 1 → 10, pausa, troca de
+direção, reset de relógio e rajada de `Enter`.
 
 **Restauração:** o guard RAII restaura em saída normal, exceção e `Esc`. O
 wizard instala handlers de SIGINT/SIGTERM que apenas setam um
@@ -355,6 +356,27 @@ diretório de configuração do Hyprland, que pode ser diferente de
 `~/.config/hypr` em instalações fora do padrão ou em configs versionadas. A
 prioridade está no `--help`, no README e aqui, e a resolução pura tem teste
 unitário (`resolveProfilePath`).
+
+### Integração no `monitors.lua` (W4)
+
+**Decisão:** a config do usuário consome o perfil com `pcall(require,
+"hdrcal")`, lê `profiles["DP-2"]` e passa `min_luminance`, `max_luminance` e
+`max_avg_luminance` ao `hl.monitor`. `pcall` foi escolhido porque `require` de
+um módulo inexistente gera erro Lua; sem o `pcall`, a config inteira deixaria de
+carregar antes da primeira calibração. Os campos usam o idioma
+`profile and profile.campo or nil`; valores `nil` são omitidos da tabela e o
+merge do `hl.monitor` preserva `bitdepth = 10`/`cm = "hdr"`.
+
+**Verificação ao vivo (2026-10-19):** sem `hdrcal.lua`, `hyprctl reload` não
+produziu config errors, a tabela capturada tinha apenas os campos originais e
+o `probe` continuou em `max bpc=10`, `eotf=2`, `XRGB2101010`. Com um perfil
+temporário (`0.02/600/350`), a tabela passou a incluir os três campos de
+luminância e o `probe` continuou em 10 bits/HDR. O perfil temporário foi
+removido depois; os valores do smoke test não foram promovidos a calibração.
+
+**Regra permanente:** o hdrcal **não edita config do usuário**. A edição de
+`~/.config/hypr/monitors.lua` em 2026-10-19 foi a única exceção, expressamente
+autorizada pelo usuário para o W4. Integrações futuras exigem novo pedido.
 
 ## Pré-condições (seção 8.2)
 

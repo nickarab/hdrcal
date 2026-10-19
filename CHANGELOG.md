@@ -163,9 +163,9 @@ valor ao padrão.
   vez por pressão física. As setas (finas e `Shift`) passaram a ser
   `repeatable`; `Enter`/`Esc` permanecem single-shot.
 - O mpv usa autorepeat próprio com `--native-keyrepeat=no`,
-  `--input-ar-delay=200` e `--input-ar-rate=15` (em vez dos 40/s padrão). A taxa
-  menor evita encher o FIFO enquanto cada passo regenera o padrão e troca o
-  arquivo pelo IPC.
+  `--input-ar-delay=200` e `--input-ar-rate=10` (em vez dos 40/s padrão). A taxa
+  menor evita encher o FIFO enquanto cada passo regenera o padrão (~54 ms
+  medidos para 2560×1440) e troca o arquivo pelo IPC.
 - `CalibrationWizard::handleKeyAt` recebe o instante da tecla. Repetições da
   mesma seta com intervalo de até 300 ms são uma pressão contínua; após 1000 ms
   o passo vira o passo grosso existente (10). Pausa, troca de direção ou reset
@@ -176,6 +176,40 @@ valor ao padrão.
   relógio e rajada de `Enter`.
 - `handleKey` continua existindo para chamadas sem relógio; ele espaça as
   pressões acima do debounce, preservando os testes e usos antigos.
+
+#### W4 — integração autorizada no `monitors.lua`
+
+- **Integração feita** em `~/.config/hypr/monitors.lua` com autorização
+  expressa do usuário. O restante do arquivo (output, modo, posição, scale,
+  `bitdepth = 10`, `cm = "hdr"`) não mudou. Diff aplicado:
+
+  ```lua
+  +local ok, hdrcal = pcall(require, "hdrcal")
+  +local profile = ok and hdrcal and hdrcal.profiles and hdrcal.profiles["DP-2"] or nil
+  +
+   hl.monitor({
+       output = "DP-2",
+       ...
+       bitdepth = 10,
+       cm = "hdr",
+  +    min_luminance = profile and profile.min_luminance or nil,
+  +    max_luminance = profile and profile.max_luminance or nil,
+  +    max_avg_luminance = profile and profile.max_avg_luminance or nil,
+   })
+  ```
+
+- **Fallback sem perfil:** `pcall` impede que a ausência de `hdrcal.lua`
+  derrube a config. Verificado ao vivo: reload sem config errors, tabela
+  capturada sem os campos de luminância, `probe` em `max bpc=10`, `eotf=2`,
+  `XRGB2101010`.
+- **Com perfil:** perfil temporário `0.02/600/350` foi lido pelo
+  `require("hdrcal")` e os três campos chegaram ao `hl.monitor` (capturados com
+  wrapper em `hyprctl eval`); `probe` continuou em 10 bits/HDR. O perfil
+  temporário foi removido e o reload final voltou ao fallback sem perfil.
+- **Documentado:** a regra permanente "o hdrcal não edita config do usuário"
+  continua valendo; esta foi a única exceção autorizada, registrada em
+  `docs/DESIGN_NOTES.md`.
+- O exemplo do README foi alinhado ao código real (incluindo o `pcall`).
 
 ### Decidido
 
@@ -342,10 +376,89 @@ o diretório temporário, e restaurou `cm_auto_hdr=1`. SIGTERM no meio da sessã
 mesma restauração, sem mpv órfão. Watchdog: testes de crash (mata o mpv e roda
 o comando de restauração) e de encerramento gracioso passaram.
 
+### Última verificação (W1–W4, 2026-10-19)
+
+Ambiente: Hyprland 0.56.2, DP-2 em HDR (`eotf=2`, `max bpc=10`,
+`XRGB2101010`), perfil `~/.config/hypr/hdrcal.lua` ausente no teste de fallback.
+
+```text
+$ cmake --build build --clean-first -j
+[100%] Built target hdrcal
+[100%] Built target hdrcal_tests
+# GCC, -Wall -Wextra -Wpedantic -Werror: zero warnings
+
+$ cmake --build build-clang --clean-first -j
+[100%] Built target hdrcal_tests
+[100%] Built target hdrcal
+# Clang, mesmas flags: zero warnings
+
+$ ctest --test-dir build --output-on-failure
+1/1 Test #1: hdrcal_unit_tests ................   Passed    0.76 sec
+100% tests passed out of 1
+Total Test time (real) =   0.76 sec
+
+$ ./build/hdrcal_tests | tail -1
+122 passaram, 0 falharam
+
+$ clang-format --dry-run --Werror $(find include src tests -name '*.cpp' -o -name '*.hpp')
+exit=0  # zero violações
+```
+
+`monitors.lua` integrado, fallback sem `hdrcal.lua` (tabela capturada com
+wrapper em `hyprctl eval`, sem erros de config):
+
+```text
+$ hyprctl configerrors
+(vazio)
+
+$ # tabela passada ao hl.monitor
+bitdepth=10
+cm=hdr
+mode=2560x1440@120
+output=DP-2
+position=0x0
+scale=1
+
+$ ./build/hdrcal probe --output DP-2
+KMS DP-2:
+  max bpc: 10
+  eotf: 2
+  max_cll: 603
+  max_fall: 603
+Hyprland DP-2:
+  currentFormat: XRGB2101010
+  colorManagementPreset: hdr
+```
+
+Com perfil temporário (`0.02/600/350`) o `require("hdrcal")` foi lido e os três
+campos chegaram ao `hl.monitor`; o `probe` continuou em 10 bits/HDR. O perfil
+temporário foi removido e o reload final voltou ao fallback.
+
+Wizard ao vivo com as correções W2/W3 (teclas sintéticas, não é calibração
+real):
+
+```text
+$ hyprctl eval 'hl.config({ render = { cm_auto_hdr = 0 } })'
+$ ./build/hdrcal wizard --output DP-2 --profile-path /tmp/opencode/hdrcal-w2w4/hdrcal.lua
+Pré-condições OK. Abrindo mpv em fullscreen (2560x1440)...
+Fase 1/3 — luminância mínima: ...
+Fase 2/3 — luminância máxima: ...
+Fase 3/3 — frame completo: ...
+
+Calibração concluída. Perfil salvo em /tmp/opencode/hdrcal-w2w4/hdrcal.lua
+  min_luminance = 0.002642409835434442
+  max_luminance = 691
+  max_avg_luminance = 604
+exit=0
+```
+
+O `osd-overlay` permanente foi aceito (o wizard abortaria se o IPC retornasse
+erro). As teclas sintéticas sofreram eventos perdidos/atrasados; os valores
+acima são mecânica, não calibração. Após o wizard: `render:cm_auto_hdr=1`, sem
+mpv órfão, diretório de sessão removido e `probe` ainda em 10 bits/HDR.
+
 ### Pendente
 
-- M2: integração explícita em `monitors.lua` para aplicar o perfil no
-  reload/reboot (W4).
 - M2: verificar com padrão acima de 603 nits que a regra temporária
   `max_luminance=10000` impede o tone mapping do compositor.
 - M3, M4 e M5 conforme `docs/DEVELOPMENT_PLAN.md`.

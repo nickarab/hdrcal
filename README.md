@@ -201,11 +201,11 @@ return {
 Para que o perfil seja aplicado, a configuração do monitor precisa consumir a
 tabela. O projeto **não altera** `monitors.lua` automaticamente: a integração
 é um ponto acordado com o usuário (seção 12 das instruções). Exemplo de
-consumo em `monitors.lua`:
+consumo em `monitors.lua`, seguro quando o perfil ainda não existe:
 
 ```lua
-local hdrcal = require("hdrcal")
-local profile = hdrcal.profiles["DP-2"]
+local ok, hdrcal = pcall(require, "hdrcal")
+local profile = ok and hdrcal and hdrcal.profiles and hdrcal.profiles["DP-2"] or nil
 
 hl.monitor({
     output = "DP-2",
@@ -219,6 +219,13 @@ hl.monitor({
     max_avg_luminance = profile and profile.max_avg_luminance or nil,
 })
 ```
+
+O `pcall` mantém a config carregando quando `hdrcal.lua` não existe. Campos com
+valor `nil` são omitidos da tabela, então o `hl.monitor` resultante preserva
+`bitdepth`/`cm` e não inventa luminâncias. Com perfil, os três campos são
+passados ao compositor. A integração foi aplicada ao `monitors.lua` deste
+usuário em 2026-10-19 com autorização explícita (W4); a regra permanente do
+projeto continua sendo não editar config de usuário por conta própria.
 
 O `require("hdrcal")` é relido em cada `hyprctl reload`; o cache de módulos Lua
 do Hyprland é limpo antes da releitura.
