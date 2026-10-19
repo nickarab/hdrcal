@@ -156,6 +156,27 @@ valor ao padrão.
   `buildMpvInstructionOverlayJson`, que usa argumentos nomeados (exigidos pelo
   `osd-overlay`) e converte quebras de linha em `\N` do ASS.
 
+#### W3 — segurar as setas repete e acelera
+
+- **Corrigido:** os bindings gerados em `key-forward.lua` usavam
+  `mp.add_forced_key_binding` sem `repeatable`, então o mpv disparava uma única
+  vez por pressão física. As setas (finas e `Shift`) passaram a ser
+  `repeatable`; `Enter`/`Esc` permanecem single-shot.
+- O mpv usa autorepeat próprio com `--native-keyrepeat=no`,
+  `--input-ar-delay=200` e `--input-ar-rate=15` (em vez dos 40/s padrão). A taxa
+  menor evita encher o FIFO enquanto cada passo regenera o padrão e troca o
+  arquivo pelo IPC.
+- `CalibrationWizard::handleKeyAt` recebe o instante da tecla. Repetições da
+  mesma seta com intervalo de até 300 ms são uma pressão contínua; após 1000 ms
+  o passo vira o passo grosso existente (10). Pausa, troca de direção ou reset
+  de relógio reiniciam no passo 1.
+- `Enter` e `Escape` têm debounce de 250 ms e a janela é estendida enquanto a
+  rajada continua, então segurar `Enter` avança no máximo uma fase. Testes de
+  unidade novos: passo 1 → 10 no limiar, pausa, troca de direção, reset de
+  relógio e rajada de `Enter`.
+- `handleKey` continua existindo para chamadas sem relógio; ele espaça as
+  pressões acima do debounce, preservando os testes e usos antigos.
+
 ### Decidido
 
 - `hyprctl keyword` não funciona com a configuração Lua do Hyprland 0.56.2;

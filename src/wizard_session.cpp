@@ -212,19 +212,21 @@ local function send(key)
     file:flush()
 end
 
-local function bind(key, name, value)
-    local ok, err = pcall(mp.add_forced_key_binding, key, name, function() send(value) end)
+local function bind(key, name, value, repeatable)
+    local ok, err = pcall(mp.add_forced_key_binding, key, name, function() send(value) end, { repeatable = repeatable })
     if not ok then
         mp.msg.warn("hdrcal: cannot bind " .. key .. ": " .. tostring(err))
     end
 end
 
-bind("LEFT", "hdrcal-left", "left")
-bind("RIGHT", "hdrcal-right", "right")
-bind("Shift+LEFT", "hdrcal-shift-left", "shift-left")
-bind("Shift+RIGHT", "hdrcal-shift-right", "shift-right")
-bind("ENTER", "hdrcal-enter", "enter")
-bind("ESC", "hdrcal-escape", "escape")
+-- Arrows repeat while held (mpv autorepeat). Enter/Escape stay single-shot:
+-- holding them must not save several phases or abort in a loop.
+bind("LEFT", "hdrcal-left", "left", true)
+bind("RIGHT", "hdrcal-right", "right", true)
+bind("Shift+LEFT", "hdrcal-shift-left", "shift-left", true)
+bind("Shift+RIGHT", "hdrcal-shift-right", "shift-right", true)
+bind("ENTER", "hdrcal-enter", "enter", false)
+bind("ESC", "hdrcal-escape", "escape", false)
 )lua";
 
 std::vector<std::string> buildMpvArguments(const std::string& outputName, const std::filesystem::path& socketPath, const std::filesystem::path& scriptPath,
@@ -246,6 +248,15 @@ std::vector<std::string> buildMpvArguments(const std::string& outputName, const 
         "--hdr-compute-peak=no",
         "--scale=nearest",
         "--cursor-autohide=always",
+        // Deterministic autorepeat: 200 ms before the first repeat, then 10/s.
+        // Each repeat regenerates a 2560x1440 16-bit PNG (~54 ms measured) and
+        // reloads it through IPC; mpv's default 40/s would overflow the FIFO
+        // and keep moving after the key is released. The state machine still
+        // applies the existing coarse step after one second of continuous
+        // hold.
+        "--native-keyrepeat=no",
+        "--input-ar-delay=200",
+        "--input-ar-rate=10",
         "--input-ipc-server=" + socketPath.string(),
         "--script=" + scriptPath.string(),
         "--log-file=" + logPath.string(),
@@ -399,6 +410,8 @@ WizardOutcome runCalibrationWizard(const WizardOptions& options) {
         return outcome;
     }
 
+    const std::chrono::steady_clock::time_point keyClockOrigin = std::chrono::steady_clock::now();
+
     while (!wizard.isFinished() && !wizard.isAborted() && g_terminationSignal == 0) {
         if (!mpv.isRunning()) {
             outcome.error = "o mpv terminou inesperadamente";
@@ -411,8 +424,9 @@ WizardOutcome runCalibrationWizard(const WizardOptions& options) {
 
         const PatternPhase previousPhase = wizard.currentPhase();
         const std::uint16_t previousCode = wizard.currentTenBitCode();
+        const auto eventTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - keyClockOrigin);
 
-        wizard.handleKey(*key);
+        wizard.handleKeyAt(*key, eventTime);
 
         if (wizard.isAborted()) {
             outcome.aborted = true;

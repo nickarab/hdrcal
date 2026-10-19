@@ -6,6 +6,7 @@
 #include "hdrcal/pattern.hpp"
 #include "hdrcal/profile.hpp"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -47,14 +48,27 @@ public:
     // Applies one key press. Ignored after finish or abort.
     void handleKey(WizardKey key);
 
+    // Applies one key press at `eventTime`, measured from any fixed origin in
+    // milliseconds. A held arrow key is accelerated to the existing coarse
+    // step after one second of continuous repetition. Enter and Escape are
+    // debounced so an accidental repeat cannot save or abort twice.
+    void handleKeyAt(WizardKey key, std::chrono::milliseconds eventTime);
+
 private:
     void recordCurrentPhaseAndAdvance();
+    void resetHold();
+    [[nodiscard]] bool isDiscreteKeyDebounced(WizardKey key, std::chrono::milliseconds eventTime) const;
 
     std::size_t m_phaseIndex = 0;
     std::uint16_t m_currentTenBitCode = 0;
     std::vector<PhaseResult> m_results;
     bool m_finished = false;
     bool m_aborted = false;
+    std::chrono::milliseconds m_lastEventTime{0};
+    std::optional<WizardKey> m_holdKey;
+    std::optional<std::chrono::milliseconds> m_holdStartTime;
+    std::optional<WizardKey> m_lastDiscreteKey;
+    std::chrono::milliseconds m_lastDiscreteTime{0};
 };
 
 } // namespace hdrcal

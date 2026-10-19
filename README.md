@@ -120,11 +120,14 @@ abre o mpv em fullscreen na saída indicada e conduz três fases:
 3. **frame completo** — campo branco de tela cheia; ajuste até o brilho máximo
    estável.
 
-Durante o wizard: `←`/`→` mudam 1 código, `Shift+←`/`Shift+→` mudam 10,
-`Enter` salva a fase e `Esc` aborta. A instrução da fase fica fixa no rodapé do
-mpv durante toda a fase; o código e a luminância calculada aparecem em um OSD
-separado e efêmero a cada ajuste. Ao final, o perfil é gravado e o resultado é
-impresso no terminal, incluindo uma linha pronta para colar em jogos.
+Durante o wizard: `←`/`→` mudam 1 código e, com a tecla pressionada, repetem
+continuamente (após ~1 s de pressão contínua o passo sobe para 10, o mesmo
+passo grosso de `Shift+←`/`Shift+→`). `Enter` salva a fase e `Esc` aborta, sem
+repetição: segurar essas teclas não salva nem aborta em loop. A instrução da
+fase fica fixa no rodapé do mpv durante toda a fase; o código e a luminância
+calculada aparecem em um OSD separado e efêmero a cada ajuste. Ao final, o
+perfil é gravado e o resultado é impresso no terminal, incluindo uma linha
+pronta para colar em jogos.
 
 Opções: `--profile-path <arquivo>` (prioridade máxima), `--config-dir
 <diretório>` e `HDRICAL_PROFILE_PATH`. O padrão é
