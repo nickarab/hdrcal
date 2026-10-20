@@ -25,7 +25,7 @@ plugin de compositor e suporte a outros compositores.
 |---|---|---|
 | M0 — spike do pipeline HDR | **concluído em 2026-10-19** | mpv/libplacebo entregou superfície PQ 10-bit; KMS confirmou `eotf=2` e `max bpc=10`; comparação visual 653/1023 × 712/1023 confirmada pelo usuário. |
 | M1 — núcleo | **concluído em 2026-10-19** | `pq`, `profile`, `hypr`, `kms`, `preflight`, parser JSON, CLI e testes unitários. |
-| M2 — wizard com backend mpv | **aceito pelo usuário em 2026-10-19** | padrões 16-bit/PQ, IPC do mpv, três fases, regra temporária com guard + watchdog, perfil e reload. A integração no `monitors.lua` e o consumo do perfil estão documentados abaixo. |
+| M2 — wizard com backend mpv | **concluído em 2026-10-19** | padrões 16-bit/PQ, IPC do mpv, três fases, regra temporária com guard + watchdog, perfil e reload. A integração no `monitors.lua` e o consumo do perfil estão documentados abaixo. |
 | M3 — app nativo Vulkan/Wayland | pendente | swapchain 10-bit, `VK_COLOR_SPACE_HDR10_ST2084_EXT`, `wp-color-management-v1`. |
 | M4 — qualidade | pendente | snapshot/comparação DDC, export JSON, toggle baseado em perfil. |
 | M5 — release interno | pendente | README final e teste A/B de reprodutibilidade. |
